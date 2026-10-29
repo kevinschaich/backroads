@@ -19,7 +19,7 @@ const OPEN_COVER = new Set([10, 20, 30, 40, 60, 90, 95, 100]);
 const KMH_PER_MPH = 1.609344;
 
 self.onmessage = async e => {
-  if (e.data.type === "buildings") {          // a building tile the page fetched for us
+  if (e.data.type === "buildings" || e.data.type === "token") {   // something the page fetched for us
     const p = pendingTiles.get(e.data.rid); pendingTiles.delete(e.data.rid);
     if (e.data.error) p?.reject(new Error(e.data.error)); else p?.resolve(e.data.list);
     return;
@@ -324,12 +324,14 @@ async function overtureBuildings(s, w, n, e) {
   return out;
 }
 
-let sasToken = null;
-async function landcoverToken() {
-  if (sasToken && sasToken.expires > Date.now() + 120000) return sasToken.token;
-  const j = await (await fetch("https://planetarycomputer.microsoft.com/api/sas/v1/token/ai4edataeuwest/esa-worldcover")).json();
-  sasToken = { token: j.token, expires: Date.parse(j["msft:expiry"]) || Date.now() + 1800000 };
-  return sasToken.token;
+// The page fetches the WorldCover access token once for all workers (src/landcover.ts); its endpoint
+// rate-limits when every worker asks for its own.
+function landcoverToken() {
+  const rid = ++tileRequests;
+  return new Promise((resolve, reject) => {
+    pendingTiles.set(rid, { resolve, reject });
+    postMessage({ type: "token", rid });
+  });
 }
 
 // ESA WorldCover classes for every raster cell (0 where unknown). Reads only the needed window
@@ -394,7 +396,8 @@ async function measureTile(tx, ty, tz, stage) {
   const raster = new Raster(x0, y1, Math.ceil((x1 - x0) / CELL), Math.ceil((y1 - y0) / CELL));
 
   // Land cover and elevation load alongside the map data.
-  const coverP = timed(t, "landcover", landcover(raster, proj, s, w, n, e)).catch(err => (console.warn("land cover:", err), null));
+  let coverError = "";
+  const coverP = timed(t, "landcover", landcover(raster, proj, s, w, n, e)).catch(err => (coverError = String(err && err.message || err), null));
   const elevP = timed(t, "elevation", elevation(s, w, n, e)).catch(err => (console.warn("elevation:", err), null));
   let overtureError = "";
   const overtureP = timed(t, "buildings", overtureBuildings(s, w, n, e)).catch(err => (overtureError = String(err && err.message || err), null));
@@ -409,6 +412,8 @@ async function measureTile(tx, ty, tz, stage) {
   else throw new Error(`Overture buildings didn't load: ${overtureError || "unknown error"}`);
   stage(`Measuring roads (data from ${osm.provider})`);
   const [cover, elev] = await Promise.all([coverP, elevP]);
+  // Scoring without land cover would drop every road's open land to zero; fail and retry instead.
+  if (!cover) throw new Error(`Land cover didn't load: ${coverError || "unknown error"}`);
   const tMeasure = performance.now();
 
   const ways = osm.roads, points = osm.points, polys = osm.polys;
@@ -433,11 +438,16 @@ async function measureTile(tx, ty, tz, stage) {
     if (any) nature = raster.boxSum(open, NEAR);
   }
 
-  const degree = new Map();
+  const degree = new Map(), roadDegree = new Map();
+  const mLat = 100 / 110540, mLon = 100 / (111320 * Math.cos(lat0 * Math.PI / 180));
+  const inside = g => g.lat > s + mLat && g.lat < n - mLat && g.lon > w + mLon && g.lon < e - mLon;
   for (const wy of ways) {
     if (!DRIVABLE.has(wy.tags.highway)) continue;
     const L = wy.keys.length;
     wy.keys.forEach((nd, k) => degree.set(nd, (degree.get(nd) || 0) + (k > 0) + (k < L - 1)));
+    // Real roads only (no driveways or tracks): a road whose end meets no other road is a dead end, even if a
+    // driveway continues from it. Uses OSM's node network, so ending at a T-junction counts as connected.
+    if (INCLUDE.has(wy.tags.highway)) wy.keys.forEach((nd, k) => roadDegree.set(nd, (roadDegree.get(nd) || 0) + (k > 0) + (k < L - 1)));
   }
 
   const roads = [];
@@ -474,6 +484,8 @@ async function measureTile(tx, ty, tz, stage) {
       hairpins: hairpins(pts),
       speed: parseMaxspeed(t.maxspeed),
       own: mid.lat >= ts && mid.lat < tn && mid.lon >= tw && mid.lon < te,
+      // Only trust "meets nothing" well inside the fetched area: past its edge, the road it meets wasn't fetched.
+      deadEnds: [0, wy.keys.length - 1].filter(k => (roadDegree.get(wy.keys[k]) || 0) <= 1 && inside(wy.geometry[k])).length,
     });
   }
 
@@ -513,7 +525,7 @@ async function measureTile(tx, ty, tz, stage) {
       id: rd.way.id, h: rd.way.tags.highway, l: Math.round(rd.length),
       c: sum("turning") / km, e: sum("relief") / km, st: sum("stops") / mi, a: sum("access") / mi,
       b: sum("bsum") / nn / boxM * 1609.344, cm: sum("com") / nn, nt: nature ? sum("nat") / nn : null,
-      cl: Math.round(L), hp: sum("hairpins") / mi,
+      cl: Math.round(L), hp: sum("hairpins") / mi, de: rd.deadEnds,
     };
     if (speed != null) { p.s = Math.round(speed); p.ss = src; }
     if (k) p.n = k;

@@ -6,8 +6,8 @@
 // minimum takes the class of the road around it (a 200 m yellow blip on a bad road becomes bad; a 200 m gap in a
 // great road becomes great). A short road with nothing around it becomes bad.
 //
-// Also: a residential road only counts as a remote backroad if both its ends meet another road; twisty
-// subdivision streets that dead-end in the hills aren't drives.
+// Also: a residential road only counts as a remote backroad if both its ends meet another road; subdivision
+// streets that dead-end in the hills aren't drives.
 //
 // Runs that reach an area that isn't loaded yet are left alone, since the road may continue there.
 import { classify, RULES, type Road, type Verdict, type Weights } from './scoring'
@@ -31,18 +31,19 @@ export function finalize(lines: Line[], weights: Weights, loaded: (lonLat: numbe
     const name = (i: number) => lines[i].properties.n
     const len = (i: number) => lines[i].properties.l
 
-    // Dead-end backroads: a remote residential road whose outer end meets nothing.
-    const deadEnd = (i: number) => ends[i].some((k) => at.get(k)!.length === 1 && !open.has(k))
+    // Dead-end backroads: a remote residential road with an end that meets no other road (the worker reads this from
+    // OSM's node network, so ending at a T-junction counts as connected). A named road counts as a whole.
+    const backroad = (r: string) => r === 'backroad' || r === 'backroad_great'
     const byName = new Map<string, number[]>()
     lines.forEach((_, i) => {
         const n = name(i)
         if (n) byName.has(n) ? byName.get(n)!.push(i) : byName.set(n, [i])
     })
     for (const idx of byName.values())
-        if (idx.some(deadEnd))
-            for (const i of idx) if (v[i].r === 'backroad' || v[i].r === 'backroad_twisty') v[i] = { ...v[i], k: 0, r: 'dead_end' }
-    lines.forEach((_, i) => {
-        if (!name(i) && (v[i].r === 'backroad' || v[i].r === 'backroad_twisty') && deadEnd(i)) v[i] = { ...v[i], k: 0, r: 'dead_end' }
+        if (idx.some((i) => (lines[i].properties.de ?? 0) > 0))
+            for (const i of idx) if (backroad(v[i].r)) v[i] = { ...v[i], k: 0, r: 'dead_end' }
+    lines.forEach((l, i) => {
+        if (!name(i) && backroad(v[i].r) && (l.properties.de ?? 0) > 0) v[i] = { ...v[i], k: 0, r: 'dead_end' }
     })
 
     // Segments that continue each other as one road.

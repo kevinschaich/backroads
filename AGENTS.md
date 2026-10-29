@@ -21,7 +21,8 @@ Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run 
 - `src/buildings.ts`: Overture buildings, fetched once per z14 tile for all workers and cached.
 - `public/worker.js`: fetches and measures one ~5 km area (z13 tile). Plain JS, served as a file (it loads
   geotiff.js with `importScripts`). Bump `CACHE_VERSION` in `src/engine.ts` whenever its measurements change.
-- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`: the UI.
+- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`: the UI. Search lists loaded roads first (choosing
+  one fits it, highlights it and pins its card), then places from Photon.
 
 ## Data and loading
 
@@ -33,7 +34,9 @@ Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run 
 - Buildings: Overture PMTiles, not OSM (OSM lacks house footprints in many suburbs). An area fails and retries
   rather than scoring without buildings. Overture's CDN answers 403 to `*.vercel.app` pages, so the deployed
   site only works at the kevinschaich.com address; `index.html` redirects the raw vercel.app URL there.
-- Land cover: ESA WorldCover via a Planetary Computer SAS token and geotiff.js windowed reads. Elevation:
+- Land cover: ESA WorldCover via a Planetary Computer SAS token (fetched once for all workers in
+  `src/landcover.ts`; its endpoint rate-limits) and geotiff.js windowed reads. Like buildings, an area fails and
+  retries rather than scoring without land cover. Elevation:
   Mapterhorn Terrarium tiles.
 - Both IndexedDB caches give up after 2 s if opening stalls, rather than blocking every area.
 - No free source exists for traffic or road surface, so neither is scored.
@@ -47,12 +50,14 @@ commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m 
 - Freeways (motorway, or posted >55 mph) → scored only on curves, hills, open land, buildings and commercial:
   ≥40 ok, else bad, never great. I-280 on the Peninsula reads ok, US-101 bad.
 - Residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
-  ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok.
+  ≤1 stop/mi, ≤10% commercial). OSM tags many rural roads residential (e.g. Tillbrook Road, Hempfield Twp,
+  PA, which must read great), so a remote, named one scoring ≥62 is great; remote otherwise → ok.
 - Everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
 - Then connectivity (`src/smooth.ts`): every colored stretch on the map is at least 1 km of continuous road.
   Along each road (same name through intersections; unnamed roads where exactly two segments meet), any run
   of one class shorter than 1 km takes the class of the road around it; a short road on its own is bad.
-  Remote residential roads that dead-end are bad. Runs reaching unloaded areas are left alone. While a slider
+  Remote residential roads that dead-end are bad; the worker reads dead ends from OSM's node network (a T-junction
+  counts as connected) and only well inside the fetched area, where the road it meets was fetched too. Runs reaching unloaded areas are left alone. While a slider
   moves the map recolors from `classExpr()`; once it settles it switches to the smoothed classes.
 - Bad roads are hidden by default; "Avoid hairpins" is off by default (0 points).
 

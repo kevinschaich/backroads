@@ -7,6 +7,7 @@ import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
 maplibregl.setWorkerUrl(maplibreWorker)
 import { buildingTile } from './buildings'
+import { landcoverToken } from './landcover'
 import { finalize } from './smooth'
 import { classExpr, DEFAULT_WEIGHTS, type Road, type Verdict, type Weights, COLORS } from './scoring'
 
@@ -15,7 +16,7 @@ const MAX_TILES = 100 // more visible than this and nothing new loads ("Zoom in"
 const KEEP_TILES = 140 // areas kept in memory; the rest stay in IndexedDB
 // Loading an area is mostly waiting on the network (measuring takes ~20 ms), so more workers load more in parallel.
 const WORKERS = Math.min(6, Math.max(3, (navigator.hardwareConcurrency || 4) - 1))
-const CACHE_VERSION = 7 // bump whenever the worker's measurements change
+const CACHE_VERSION = 10 // bump whenever the worker's measurements change
 
 type Feature = { type: 'Feature'; properties: Road & Partial<Verdict>; geometry: { type: 'LineString'; coordinates: number[][] } }
 type Tile = {
@@ -31,6 +32,8 @@ type Tile = {
 }
 export type Basemap = 'dark' | 'streets' | 'satellite' | 'none'
 export type Place = { name: string; detail: string; lat: number; lon: number; extent?: [number, number, number, number] }
+/** A loaded road matching a search: all its segments, and the longest one for its card. */
+export type RoadHit = { name: string; detail: string; miles: number; k: number; bounds: [number, number, number, number]; road: Road }
 export type Snapshot = {
     status: { busy: number; done: number; error?: string; tooMany: boolean }
     jobs: { stage: string; seconds: number }[]
@@ -249,12 +252,14 @@ export class Engine {
 
     // While a slider moves, the GPU recolors instantly from the per-road expression; once it settles, the
     // connectivity pass (src/smooth.ts) recomputes the final classes and the layers switch back to them.
-    setWeights(weights: Weights) {
+    // One-off changes (Reset) skip the preview and go straight to the final classes.
+    setWeights(weights: Weights, settled = false) {
         store('weights', weights)
-        const e = classExpr(weights)
-        for (const k of [0, 1, 2]) this.map.setFilter(`r${k}`, ['==', e, k] as never)
         this.set({ weights })
         clearTimeout(this.totalsTimer)
+        if (settled) return this.draw()
+        const e = classExpr(weights)
+        for (const k of [0, 1, 2]) this.map.setFilter(`r${k}`, ['==', e, k] as never)
         this.totalsTimer = window.setTimeout(() => this.draw(), 300)
     }
 
@@ -340,6 +345,11 @@ export class Engine {
             slot.w.onmessage = (e) => {
                 const m = e.data
                 if (m.type === 'buildings') return this.sendBuildings(slot.w, m)
+                if (m.type === 'token')
+                    return landcoverToken().then(
+                        (list) => slot.w.postMessage({ type: 'token', rid: m.rid, list }),
+                        (err) => slot.w.postMessage({ type: 'token', rid: m.rid, error: String(err?.message ?? err) }),
+                    )
                 if (m.id !== id) return
                 if (m.stage) {
                     t.stage = m.stage
@@ -444,6 +454,53 @@ export class Engine {
             { padding: this.narrow ? 20 : { top: 40, bottom: 40, left: 360, right: 40 }, maxZoom: 14, animate: false },
         )
         for (let i = 0; i < 20 && (this.wanted(), this.tooMany); i++) this.map.setZoom(this.map.getZoom() + 0.25)
+        this.refresh()
+    }
+
+    /** Roads already loaded whose name contains the query, longest first. */
+    searchRoads(text: string): RoadHit[] {
+        const q = text.trim().toLowerCase()
+        if (q.length < 2) return []
+        const byName = new Map<string, Feature[]>()
+        for (const f of this.features) {
+            const n = f.properties.n
+            if (n && n.toLowerCase().includes(q)) byName.has(n) ? byName.get(n)!.push(f) : byName.set(n, [f])
+        }
+        const LABEL = ['Bad', 'OK', 'Great']
+        return [...byName.entries()]
+            .map(([name, fs]) => {
+                const meters = fs.reduce((t, f) => t + f.properties.l, 0)
+                const best = fs.reduce((a, f) => (f.properties.l > a.properties.l ? f : a))
+                const shown = [0, 0, 0]
+                for (const f of fs) shown[f.properties.k ?? 0] += f.properties.l
+                const k = shown.indexOf(Math.max(...shown))
+                let w = 180, s = 90, e = -180, n = -90
+                for (const f of fs)
+                    for (const [lon, lat] of f.geometry.coordinates) {
+                        w = Math.min(w, lon)
+                        e = Math.max(e, lon)
+                        s = Math.min(s, lat)
+                        n = Math.max(n, lat)
+                    }
+                const miles = meters / 1609.344
+                return { name, detail: `Road on the map · ${miles.toFixed(1)} mi · mostly ${LABEL[k]}`, miles, k, bounds: [w, s, e, n] as [number, number, number, number], road: { ...best.properties } }
+            })
+            .sort((a, b) => b.miles - a.miles)
+            .slice(0, 4)
+    }
+
+    /** Fit a loaded road on screen, highlight all of it, and pin its card. */
+    focusRoad(hit: RoadHit) {
+        const [w, s, e, n] = hit.bounds
+        this.map.fitBounds(
+            [
+                [w, s],
+                [e, n],
+            ],
+            { padding: this.narrow ? 40 : { top: 60, bottom: 60, left: 380, right: 380 }, maxZoom: 15, animate: false },
+        )
+        this.map.setFilter('hl', ['==', ['get', 'n'], hit.name])
+        this.set({ card: { road: hit.road, pinned: true } })
         this.refresh()
     }
 

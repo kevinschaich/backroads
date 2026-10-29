@@ -16,6 +16,7 @@ export type Road = {
     cm: number // share of frontage that's commercial
     nt: number | null // share of frontage that's open land
     hp?: number // hairpins per mile
+    de?: number // ends that meet no other road (0-2), from OSM's node network
     s?: number // speed limit, mph
     ss?: 'posted' | 'street'
 }
@@ -30,7 +31,6 @@ export const RULES = {
     remote_max_buildings_per_mi: 25,
     remote_max_stops_per_mi: 1,
     remote_max_commercial: 0.1,
-    curvy_min_deg_per_km: 120,
     great_min_score: 62,
     ok_min_score: 40,
     // Every colored stretch on the map is at least this long; shorter pieces take the class of the road around them.
@@ -73,8 +73,8 @@ export const REASONS: Record<string, string> = {
     freeway_built: 'Freeway through built-up land.',
     ramp: 'Highway ramp.',
     neighborhood: 'Residential street in a built-up area.',
-    backroad: 'Quiet road with few houses, but not very twisty.',
-    backroad_twisty: 'Slow road, but remote and twisty.',
+    backroad: 'Quiet road with few houses, but nothing special to drive.',
+    backroad_great: 'Quiet rural road: few houses, no lights, open country.',
     short: 'Too short a stretch to be worth driving to.',
     dead_end: 'Quiet road, but a dead end.',
     continues: 'A short piece of a longer good stretch.',
@@ -126,7 +126,6 @@ export function classify(p: Road, w: Weights): Verdict {
         .map((k) => (all[k] > 0 ? '+' : '-') + k)
     // Remote means few houses AND no lights or shops: campuses and office parks have few (big) buildings.
     const remote = p.b <= R.remote_max_buildings_per_mi && p.st <= R.remote_max_stops_per_mi && p.cm <= R.remote_max_commercial
-    const twisty = p.c >= R.curvy_min_deg_per_km
     let k: 0 | 1 | 2, r: string
     if (p.h.endsWith('_link')) [k, r] = [0, 'ramp']
     else if (freeway) [k, r] = score >= R.ok_min_score ? [1, 'freeway_open'] : [0, 'freeway_built']
@@ -134,7 +133,8 @@ export function classify(p: Road, w: Weights): Verdict {
         RESIDENTIAL.includes(p.h) ||
         (p.s != null && (p.s < R.slow_below_mph || (p.s === R.slow_below_mph && p.b >= R.built_up_buildings_per_mi)))
     )
-        [k, r] = remote && twisty && p.n ? [2, 'backroad_twisty'] : remote ? [1, 'backroad'] : [0, 'neighborhood']
+        // OSM tags many rural roads "residential" too; a remote, named one is judged on its score like any road.
+        [k, r] = remote && p.n && score >= R.great_min_score ? [2, 'backroad_great'] : remote ? [1, 'backroad'] : [0, 'neighborhood']
     else [k, r] = [score >= R.great_min_score ? 2 : score >= R.ok_min_score ? 1 : 0, 'score']
     // Stretches under the minimum count as Bad (hidden by default), however good they are.
     if ((p.cl ?? Infinity) < R.min_length_m && k > 0) [k, r] = [0, 'short']
@@ -179,7 +179,7 @@ export function classExpr(w: Weights): Expr {
         // Ramps are never a drive in themselves, and at map scale they read as blips.
         ['in', '_link', g('h')], 0,
         freeway, ['case', ['>=', freewayScore, R.ok_min_score], 1, 0],
-        slow, ['case', ['all', remote, ['>=', g('c'), R.curvy_min_deg_per_km], ['has', 'n']], 2, remote, 1, 0],
+        slow, ['case', ['all', remote, ['has', 'n'], ['>=', score, R.great_min_score]], 2, remote, 1, 0],
         ['>=', score, R.great_min_score], 2,
         ['>=', score, R.ok_min_score], 1,
         0,

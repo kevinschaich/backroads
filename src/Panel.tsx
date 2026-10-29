@@ -140,7 +140,7 @@ function Tune({ engine, snap }: { engine: Engine; snap: Snapshot }) {
                     )
                 })}
                 <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => engine.setWeights(DEFAULT_WEIGHTS)}>
+                    <Button variant="outline" size="sm" onClick={() => engine.setWeights(DEFAULT_WEIGHTS, true)}>
                         Reset weights
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => engine.clearCache()}>
