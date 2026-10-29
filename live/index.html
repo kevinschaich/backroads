@@ -10,6 +10,12 @@
 <meta property="og:image" content="https://kevinschaich.com/og/backroads.png">
 <meta property="og:url" content="https://kevinschaich.com/project/backroads/">
 <meta name="twitter:card" content="summary_large_image">
+<script>
+  // The canonical address is kevinschaich.com/project/backroads/. Overture's CDN refuses requests from
+  // *.vercel.app pages, so send visitors of the raw production URL there (keeping the map position).
+  if (location.hostname === "backroads-flame.vercel.app")
+    location.replace("https://kevinschaich.com/project/backroads/" + location.hash);
+</script>
 <meta name="twitter:creator" content="@kevinschaich">
 <link rel="stylesheet" href="https://kevinschaich.com/kit/v1/brand.css">
 <link rel="stylesheet" href="https://kevinschaich.com/kit/v1/project/backroads.css">
