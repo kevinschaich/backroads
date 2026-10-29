@@ -2,5 +2,6 @@
     "slug": "backroads",
     "name": "Backroads",
     "tagline": "Find the roads worth driving, anywhere.",
-    "icon": "route"
+    "icon": "route",
+    "url": "https://backroads-flame.vercel.app"
 }

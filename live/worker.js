@@ -342,19 +342,25 @@ function mvtBuildings(buf, z, x, y) {
 }
 
 // Overture's CDN occasionally drops one of many parallel range requests; retry those a few times.
+// pmtiles caches a failed header or directory fetch inside the archive object, so a retry has to
+// start from a fresh archive, or one early failure breaks every later area in this worker.
 async function withRetry(fn, tries = 4) {
   for (let i = 0; ; i++) {
     try { return await fn(); }
-    catch (err) { if (i >= tries - 1) throw err; await new Promise(r => setTimeout(r, 400 * 2 ** i)); }
+    catch (err) {
+      if (i >= tries - 1) throw err;
+      overtureArchive = null;
+      await new Promise(r => setTimeout(r, 400 * 2 ** i));
+    }
   }
 }
 
 async function overtureBuildings(s, w, n, e) {
-  overtureArchive ||= new pmtiles.PMTiles(OVERTURE_BUILDINGS);
   const Z = 14, N = 2 ** Z, jobs = [];
   const tx = lon => Math.floor((lon + 180) / 360 * N), ty = lat => Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * N);
   for (let x = tx(w); x <= tx(e); x++) for (let y = ty(n); y <= ty(s); y++)
-    jobs.push(withRetry(() => overtureArchive.getZxy(Z, x, y)).then(t => t ? mvtBuildings(t.data, Z, x, y) : []));
+    jobs.push(withRetry(() => (overtureArchive ||= new pmtiles.PMTiles(OVERTURE_BUILDINGS)).getZxy(Z, x, y))
+      .then(t => t ? mvtBuildings(t.data, Z, x, y) : []));
   // A building crossing a tile edge appears in both tiles; the double count is small and even.
   return (await Promise.all(jobs)).flat().filter(([lat, lon]) => lat >= s && lat <= n && lon >= w && lon <= e);
 }
@@ -427,7 +433,8 @@ async function measureTile(tx, ty, tz, stage) {
   // Land cover and elevation load alongside the map data.
   const coverP = landcover(raster, proj, s, w, n, e).catch(err => (console.warn("land cover:", err), null));
   const elevP = elevation(s, w, n, e).catch(err => (console.warn("elevation:", err), null));
-  const overtureP = overtureBuildings(s, w, n, e).catch(err => (console.warn("Overture buildings:", err), null));
+  let overtureError = "";
+  const overtureP = overtureBuildings(s, w, n, e).catch(err => (overtureError = String(err && err.message || err), null));
   stage("Postpass · connecting");
   // Only ask OSM for buildings if Overture already failed; otherwise it's wasted download.
   const early = await Promise.race([overtureP, new Promise(r => setTimeout(() => r(undefined), 50))]);
@@ -436,7 +443,7 @@ async function measureTile(tx, ty, tz, stage) {
   if (overture) { osm.buildings = overture; osm.buildingSource = "Overture"; }
   else if (early === null) osm.buildingSource = "OSM";
   // Scoring without buildings would paint every suburb as remote backroads; fail and retry instead.
-  else throw new Error("Overture buildings didn't load");
+  else throw new Error(`Overture buildings didn't load: ${overtureError || "unknown error"}`);
   stage(`Measuring roads (data from ${osm.provider})`);
   const [cover, elev] = await Promise.all([coverP, elevP]);
 
