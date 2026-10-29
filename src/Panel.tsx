@@ -37,7 +37,7 @@ export function Panel({ engine, snap }: { engine: Engine; snap: Snapshot }) {
                 <CardTitle>Backroads</CardTitle>
                 <CardDescription>Pan anywhere. Roads are fetched and scored in your browser from open data.</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4 pb-4">
+            <CardContent className="flex flex-col gap-4 pt-3 pb-4">
                 <Search engine={engine} />
                 <Legend engine={engine} snap={snap} />
                 <Status snap={snap} />

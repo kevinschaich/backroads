@@ -63,7 +63,7 @@ export function Search({ engine }: { engine: Engine }) {
                 aria-expanded={open}
                 aria-controls="search-results"
                 aria-activedescendant={hits.length ? `place-${active}` : undefined}
-                className="pl-8"
+                className="h-9 pl-8"
                 onChange={(e) => onChange(e.target.value)}
                 onBlur={() => setTimeout(close, 100)}
                 onKeyDown={(e) => {
