@@ -341,26 +341,58 @@ function mvtBuildings(buf, z, x, y) {
   return out;
 }
 
-// Overture's CDN occasionally drops one of many parallel range requests; retry those a few times.
-// pmtiles caches a failed header or directory fetch inside the archive object, so a retry has to
-// start from a fresh archive, or one early failure breaks every later area in this worker.
+// Overture's CDN drops some parallel range requests and answers 403/429 when a visitor asks too fast,
+// so retry with backoff (much longer when throttled). pmtiles caches a failed header or directory
+// fetch inside the archive object, so a retry starts from a fresh archive.
 async function withRetry(fn, tries = 4) {
   for (let i = 0; ; i++) {
     try { return await fn(); }
     catch (err) {
       if (i >= tries - 1) throw err;
       overtureArchive = null;
-      await new Promise(r => setTimeout(r, 400 * 2 ** i));
+      const throttled = /\b(403|429)\b/.test(String(err && err.message));
+      await new Promise(r => setTimeout(r, (throttled ? 3000 : 400) * 2 ** i));
     }
   }
+}
+
+// At most a few Overture requests in flight per worker.
+let overtureSlots = 4;
+const overtureWaiting = [];
+async function overtureLimit(fn) {
+  if (overtureSlots > 0) overtureSlots--; else await new Promise(r => overtureWaiting.push(r));
+  try { return await fn(); }
+  finally { const next = overtureWaiting.shift(); next ? next() : overtureSlots++; }
+}
+
+// Decoded building tiles, shared by all workers and kept across visits, so neighboring areas
+// (which overlap the same z14 tiles) download each tile once. Stored as flat [lat, lon, area, ...].
+const buildingDb = new Promise(res => {
+  try {
+    const req = indexedDB.open("backroads-overture", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("tiles");
+    req.onsuccess = () => res(req.result); req.onerror = () => res(null);
+  } catch { res(null); }
+});
+async function buildingStore(mode, fn) {
+  const d = await buildingDb; if (!d) return null;
+  return new Promise(res => { try { const r = fn(d.transaction("tiles", mode).objectStore("tiles")); r.onsuccess = () => res(r.result); r.onerror = () => res(null); } catch { res(null); } });
+}
+async function buildingTile(z, x, y) {
+  const key = `${OVERTURE_BUILDINGS}/${z}/${x}/${y}`;
+  const hit = await buildingStore("readonly", s => s.get(key));
+  if (hit) { const out = []; for (let i = 0; i < hit.length; i += 3) out.push([hit[i], hit[i + 1], hit[i + 2]]); return out; }
+  const t = await overtureLimit(() => withRetry(() => (overtureArchive ||= new pmtiles.PMTiles(OVERTURE_BUILDINGS)).getZxy(z, x, y)));
+  const list = t ? mvtBuildings(t.data, z, x, y) : [];
+  buildingStore("readwrite", s => s.put(Float64Array.from(list.flat()), key));
+  return list;
 }
 
 async function overtureBuildings(s, w, n, e) {
   const Z = 14, N = 2 ** Z, jobs = [];
   const tx = lon => Math.floor((lon + 180) / 360 * N), ty = lat => Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * N);
   for (let x = tx(w); x <= tx(e); x++) for (let y = ty(n); y <= ty(s); y++)
-    jobs.push(withRetry(() => (overtureArchive ||= new pmtiles.PMTiles(OVERTURE_BUILDINGS)).getZxy(Z, x, y))
-      .then(t => t ? mvtBuildings(t.data, Z, x, y) : []));
+    jobs.push(buildingTile(Z, x, y));
   // A building crossing a tile edge appears in both tiles; the double count is small and even.
   return (await Promise.all(jobs)).flat().filter(([lat, lon]) => lat >= s && lat <= n && lon >= w && lon <= e);
 }
