@@ -12,8 +12,9 @@ import {
     CollapsibleTrigger,
     Separator,
     Slider,
-    Segmented,
-    SegmentedItem,
+    Tabs,
+    TabsList,
+    TabsTrigger,
 } from '@kevinschaich/components'
 import { ChevronDown } from 'lucide-react'
 import type { Basemap, Engine, Snapshot } from './engine'
@@ -43,12 +44,14 @@ export function Panel({ engine, snap }: { engine: Engine; snap: Snapshot }) {
                 <Separator />
                 <div className="flex flex-col gap-2">
                     <span className="text-sm font-medium">Basemap</span>
-                    <Segmented value={snap.basemap} onValueChange={(v: Basemap) => engine.setBasemap(v)}>
-                        <SegmentedItem value="dark">Dark</SegmentedItem>
-                        <SegmentedItem value="streets">Streets</SegmentedItem>
-                        <SegmentedItem value="satellite">Satellite</SegmentedItem>
-                        <SegmentedItem value="none">None</SegmentedItem>
-                    </Segmented>
+                    <Tabs value={snap.basemap} onValueChange={(v) => engine.setBasemap(v as Basemap)}>
+                        <TabsList className="w-full">
+                            <TabsTrigger value="dark">Dark</TabsTrigger>
+                            <TabsTrigger value="streets">Streets</TabsTrigger>
+                            <TabsTrigger value="satellite">Satellite</TabsTrigger>
+                            <TabsTrigger value="none">None</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
                 </div>
                 <Separator />
                 <Tune engine={engine} snap={snap} />
