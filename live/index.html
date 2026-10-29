@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backroads | by kevinschaich</title>
+<meta name="description" content="Find the roads worth driving, anywhere.">
+<link rel="icon" href="https://kevinschaich.com/icon/backroads.png">
+<meta property="og:title" content="Backroads | by kevinschaich">
+<meta property="og:description" content="Find the roads worth driving, anywhere.">
+<meta property="og:image" content="https://kevinschaich.com/og/backroads.png">
+<meta property="og:url" content="https://kevinschaich.com/project/backroads/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:creator" content="@kevinschaich">
+<link rel="stylesheet" href="https://kevinschaich.com/kit/v1/brand.css">
+<link rel="stylesheet" href="https://kevinschaich.com/kit/v1/project/backroads.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+  /* Full-bleed map; shadcn/ui-style panels float over it (control panel top-left, road card top-right;
+     both become bottom sheets on phones). Tokens mirror shadcn's zinc theme. Overlays follow the
+     basemap: light on Streets, dark everywhere else. */
+  :root, :root[data-theme="dark"] {
+    --background: #09090b; --foreground: #fafafa; --card: #09090b; --muted: #27272a; --muted-foreground: #a1a1aa;
+    --border: #27272a; --input: #3f3f46; --primary: #fafafa; --primary-foreground: #18181b; --accent: #27272a; --ring: #d4d4d8;
+    --check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2318181b' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
+    color-scheme: dark;
+  }
+  :root[data-theme="light"] {
+    --background: #ffffff; --foreground: #09090b; --card: #ffffff; --muted: #f4f4f5; --muted-foreground: #71717a;
+    --border: #e4e4e7; --input: #e4e4e7; --primary: #18181b; --primary-foreground: #fafafa; --accent: #f4f4f5; --ring: #a1a1aa;
+    --check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fafafa' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 10px 30px rgba(0,0,0,.16);
+    color-scheme: light;
+  }
+  :root { --great: #2bff88; --ok: #ffd60a; --bad: #ff4646; --ground: #18181b; --radius: 8px;
+          --sans: var(--font-sans, system-ui, sans-serif); --mono: var(--font-mono, ui-monospace, monospace); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--ground); color: var(--foreground); font: 14px/1.45 var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
+  #map { position: fixed; inset: 0; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+  /* Card */
+  .panel { position: fixed; z-index: 2; background: var(--card); color: var(--foreground); border: 1px solid var(--border);
+           border-radius: 12px; box-shadow: var(--shadow); }
+  #ctl { top: calc(12px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); width: 312px;
+         max-height: calc(100% - 24px); overflow: auto; }
+  .sec { padding: 14px 16px; border-top: 1px solid var(--border); }
+  .sec:first-child { border-top: 0; padding-top: 16px; }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.015em; line-height: 1.3; }
+  .sub { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+  .label { font-size: 13px; font-weight: 500; margin: 0 0 8px; }
+
+  /* Legend rows with shadcn Checkbox */
+  .legend { display: grid; gap: 2px; padding-top: 10px; padding-bottom: 10px; }
+  .lg { display: grid; grid-template-columns: 16px 20px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; cursor: pointer; user-select: none; }
+  .lg b { font-weight: 500; font-size: 14px; } .lg small { color: var(--muted-foreground); font-size: 12.5px; }
+  input[type="checkbox"] { appearance: none; margin: 0; width: 16px; height: 16px; border: 1px solid var(--primary); border-radius: 4px;
+    background: transparent center / 12px no-repeat; cursor: pointer; transition: background-color .15s; }
+  input[type="checkbox"]:checked { background-color: var(--primary); background-image: var(--check); }
+  .sw { height: 6px; border-radius: 999px; }
+  .num { font: 500 12px var(--mono); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+  /* Tabs (segmented basemap control) */
+  .seg { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--muted); border-radius: var(--radius); padding: 3px; gap: 2px; height: 36px; }
+  .seg button { font: 500 13px var(--sans); color: var(--muted-foreground); background: none; border: 0; border-radius: 6px; cursor: pointer; transition: all .15s; }
+  .seg button:hover { color: var(--foreground); }
+  .seg button[aria-pressed="true"] { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; font: 500 13px var(--sans); color: var(--foreground);
+         background: var(--background); border: 1px solid var(--input); border-radius: var(--radius); cursor: pointer; transition: background-color .15s; }
+  .btn:hover { background: var(--accent); }
+  .icon-btn { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: none;
+              color: var(--muted-foreground); cursor: pointer; transition: all .15s; }
+  .icon-btn:hover { background: var(--accent); color: var(--foreground); }
+
+  /* Accordion */
+  details summary { cursor: pointer; font-weight: 500; font-size: 14px; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary svg { color: var(--muted-foreground); transition: transform .2s; }
+  details[open] summary svg { transform: rotate(180deg); }
+  .hint { margin: 10px 0 4px; font-size: 12.5px; color: var(--muted-foreground); }
+
+  /* Slider */
+  .sl { display: grid; grid-template-columns: 1fr 36px; gap: 2px 10px; align-items: center; margin-top: 12px; font-size: 13px; }
+  .sl span { grid-column: 1 / -1; display: flex; justify-content: space-between; }
+  .sl output { font: 500 12px var(--mono); text-align: right; color: var(--muted-foreground); grid-column: 2; grid-row: 2; }
+  input[type="range"] { appearance: none; width: 100%; height: 6px; margin: 6px 0; border-radius: 999px; cursor: pointer;
+    background: linear-gradient(var(--primary), var(--primary)) 0 / var(--p, 50%) 100% no-repeat, var(--muted); }
+  input[type="range"]::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--background); border: 2px solid var(--primary); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--background); border: 2px solid var(--primary); }
+
+  /* Search (shadcn Command) */
+  .search { padding-top: 0; border-top: 0; }
+  .cmd { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--input); border-radius: var(--radius);
+         background: var(--background); color: var(--muted-foreground); }
+  .cmd:focus-within { outline: 2px solid var(--ring); outline-offset: 1px; }
+  .cmd input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--foreground); font: 14px var(--sans); }
+  .cmd input::placeholder { color: var(--muted-foreground); }
+  .cmd input::-webkit-search-cancel-button { display: none; }
+  #results { list-style: none; margin: 6px 0 0; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); }
+  #results li { padding: 7px 8px; border-radius: 6px; font-size: 13.5px; cursor: pointer; display: grid; }
+  #results li small { color: var(--muted-foreground); font-size: 12px; }
+  #results li[aria-selected="true"], #results li:hover { background: var(--accent); }
+  #results li.empty { color: var(--muted-foreground); cursor: default; background: none; }
+
+  /* Status */
+  #status { font-size: 13px; color: var(--muted-foreground); display: flex; gap: 8px; align-items: center; min-height: 18px; }
+  #status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--input); flex: none; }
+  #status.busy .dot { background: #3b82f6; animation: pulse 1s infinite; } #status.err .dot { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  #jobs { list-style: none; margin: 8px 0 0 16px; padding: 0; font-size: 12px; color: var(--muted-foreground); display: grid; gap: 3px; }
+  #jobs li { display: flex; justify-content: space-between; gap: 8px; } #jobs li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  
+  /* Road card (hover preview; click pins it until closed) */
+  #card { top: calc(12px + env(safe-area-inset-top)); right: calc(56px + env(safe-area-inset-right)); width: 300px; padding: 16px; display: none; }
+  #card.show { display: block; }
+  #card h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.01em; padding-right: 28px; line-height: 1.3; }
+  #card .x { position: absolute; top: 10px; right: 10px; display: none; }
+  #card.pinned .x { display: grid; }
+  #card.pinned { border-color: var(--input); }
+  .badges { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #09090b; }
+  .badge.outline { color: var(--muted-foreground); background: none; border: 1px solid var(--border); font: 500 11.5px var(--mono); }
+  #card p { margin: 0 0 12px; font-size: 13.5px; }
+  #card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0; font-size: 13px; border-top: 1px solid var(--border); }
+  #card dt, #card dd { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  #card dt { color: var(--muted-foreground); } #card dd { margin: 0; font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; }
+  #card a { display: inline-flex; margin-top: 12px; font-size: 12.5px; color: var(--muted-foreground); text-underline-offset: 3px; }
+  #card a:hover { color: var(--foreground); }
+  .pin-hint { margin-top: 10px; font-size: 11.5px; color: var(--muted-foreground); }
+  #card.pinned .pin-hint { display: none; }
+
+  @media (max-width: 640px) {
+    #ctl { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); left: 8px; right: 8px; width: auto; max-height: 46%; }
+    #ctl .hide-sm, .pin-hint { display: none; }
+    #card { top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); left: 8px; right: 8px; width: auto; z-index: 3; max-height: 60%; overflow: auto; }
+  }
+</style>
+
+<div id="map"></div>
+
+<div id="ctl" class="panel">
+  <div class="sec">
+    <h1>Backroads</h1>
+    <p class="sub">Pan anywhere. Roads are fetched and scored in your browser from open data.</p>
+  </div>
+  <div class="sec search">
+    <div class="cmd">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search a town, address or ZIP" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-controls="results" aria-autocomplete="list">
+    </div>
+    <ul id="results" role="listbox" hidden></ul>
+  </div>
+  <div class="sec legend">
+    <label class="lg"><input type="checkbox" data-k="2" checked><span class="sw" style="background:var(--great)"></span>
+      <span><b>Great</b> <small class="hide-sm">curves, hills, open land</small></span><span class="num" id="n2"></span></label>
+    <label class="lg"><input type="checkbox" data-k="1" checked><span class="sw" style="background:var(--ok)"></span>
+      <span><b>OK</b> <small class="hide-sm">freeways, plain roads</small></span><span class="num" id="n1"></span></label>
+    <label class="lg"><input type="checkbox" data-k="0" checked><span class="sw" style="background:var(--bad)"></span>
+      <span><b>Bad</b> <small class="hide-sm">lights, strip malls, neighborhoods</small></span><span class="num" id="n0"></span></label>
+  </div>
+  <div class="sec">
+    <div id="status"><span class="dot"></span><span id="statusText">Starting…</span></div>
+    <ul id="jobs"></ul>
+  </div>
+  <div class="sec">
+    <div class="label">Basemap</div>
+    <div class="seg" id="basemap">
+      <button data-b="dark" aria-pressed="true">Dark</button><button data-b="streets" aria-pressed="false">Streets</button>
+      <button data-b="satellite" aria-pressed="false">Satellite</button><button data-b="none" aria-pressed="false">None</button>
+    </div>
+  </div>
+  <div class="sec">
+    <details id="tune">
+      <summary>Tune the score <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></summary>
+      <div id="sliders"></div>
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="reset">Reset weights</button><button class="btn" id="clear">Clear cache</button></div>
+    </details>
+  </div>
+</div>
+
+<div id="card" class="panel" role="dialog" aria-live="polite"><button class="x icon-btn" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><div id="cardBody"></div></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+// Scoring thresholds and weights. Sliders change the weights; everything else is fixed here.
+const DEFAULTS = {
+  rules: { slow_below_mph: 30, built_up_buildings_per_mi: 100, fast_above_mph: 55, remote_max_buildings_per_mi: 25, remote_max_stops_per_mi: 1, remote_max_commercial: 0.1, curvy_min_deg_per_km: 120, great_min_score: 62, ok_min_score: 40 },
+  score: { base: 50, curves: { points: 25, full_at: 200 }, hills: { points: 12, full_at: 40 }, nature: { points: 15 },
+    stops: { points: -40, full_at: 4 }, access: { points: -20, free: 4, full_at: 24 }, buildings: { points: -20, full_at: 80 }, commercial: { points: -20 } },
+};
+// Each slider is how many points (of 100) a factor can add ("Prefer") or take away ("Avoid"); 0 ignores it.
+const SLIDERS = [["curves", "Prefer curves", 50], ["hills", "Prefer hills", 30], ["nature", "Prefer open land", 30],
+  ["stops", "Avoid lights & stops", 60], ["access", "Avoid turn-offs", 40], ["buildings", "Avoid buildings", 40], ["commercial", "Avoid commercial", 40]];
+const SIGN = Object.fromEntries(SLIDERS.map(([k]) => [k, Math.sign(DEFAULTS.score[k].points)]));
+const TILE_Z = 13, MAX_TILES = 100, KEEP_TILES = 140, WORKERS = 3, CACHE_VERSION = 5;
+const COLORS = ["#ff4646", "#ffd60a", "#2bff88"], CLASS = ["Bad", "OK", "Great"];
+const RULES = { freeway: "Freeway.", ramp: "Highway ramp.", highway: "Posted over 55 mph, so it drives like a highway.",
+  neighborhood: "Residential street in a built-up area.", backroad: "Quiet road with few houses, but not very twisty.",
+  backroad_twisty: "Slow road, but remote and twisty." };
+const FACTORS = { "+curves": "curvy", "+hills": "hilly", "+nature": "open land or forest alongside", "-stops": "frequent lights or stop signs",
+  "-access": "lots of driveways and side streets", "-buildings": "built up on both sides", "-commercial": "commercial frontage" };
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const store = (k, v) => { try { v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const recall = k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+let weights = Object.assign(Object.fromEntries(SLIDERS.map(([k]) => [k, DEFAULTS.score[k].points])), recall("weights") || {});
+
+// ---------------------------------------------------------------- scoring
+
+function classify(p) {
+  const s = DEFAULTS.score, R = DEFAULTS.rules, clamp1 = v => Math.min(v, 1);
+  const parts = {
+    curves: weights.curves * clamp1(p.c / s.curves.full_at),
+    hills: weights.hills * clamp1(p.e / s.hills.full_at),
+    nature: weights.nature * (p.nt ?? 0),
+    stops: weights.stops * clamp1(p.st / s.stops.full_at),
+    access: weights.access * clamp1(Math.max(p.a - s.access.free, 0) / (s.access.full_at - s.access.free)),
+    buildings: weights.buildings * clamp1(p.b / s.buildings.full_at),
+    commercial: weights.commercial * p.cm,
+  };
+  const score = Math.max(0, Math.min(100, s.base + Object.values(parts).reduce((a, b) => a + b, 0)));
+  const factors = Object.entries(parts).filter(([, v]) => Math.abs(v) >= 4).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 3).map(([k, v]) => (v > 0 ? "+" : "-") + k);
+  // Remote means few houses AND no lights or shops: campuses and office parks have few (big) buildings.
+  const remote = p.b <= R.remote_max_buildings_per_mi && p.st <= R.remote_max_stops_per_mi && p.cm <= R.remote_max_commercial, twisty = p.c >= R.curvy_min_deg_per_km;
+  let k, r;
+  if (p.h === "motorway" || p.h === "motorway_link") [k, r] = [1, "freeway"];
+  else if (p.h.endsWith("_link")) [k, r] = [1, "ramp"];
+  else if (p.s != null && p.s > R.fast_above_mph) [k, r] = [1, "highway"];
+  else if (p.h === "residential" || p.h === "living_street" || (p.s != null && (p.s < R.slow_below_mph || (p.s === R.slow_below_mph && p.b >= R.built_up_buildings_per_mi))))
+    [k, r] = remote && twisty && p.n ? [2, "backroad_twisty"] : remote ? [1, "backroad"] : [0, "neighborhood"];
+  else [k, r] = [score >= R.great_min_score ? 2 : score >= R.ok_min_score ? 1 : 0, "score"];
+  return { k, r, sc: Math.round(score), f: factors };
+}
+
+// The same rules as classify() as a MapLibre expression, so the GPU recolors every road the moment a
+// slider moves; no road data is re-sent or re-measured. Keep the two in sync.
+function classExpr() {
+  const s = DEFAULTS.score, R = DEFAULTS.rules, g = k => ["get", k], min1 = x => ["min", x, 1], speed = ["to-number", g("s")];
+  const score = ["+", s.base,
+    ["*", weights.curves, min1(["/", g("c"), s.curves.full_at])],
+    ["*", weights.hills, min1(["/", g("e"), s.hills.full_at])],
+    ["*", weights.nature, ["coalesce", g("nt"), 0]],
+    ["*", weights.stops, min1(["/", g("st"), s.stops.full_at])],
+    ["*", weights.access, min1(["/", ["max", ["-", g("a"), s.access.free], 0], s.access.full_at - s.access.free])],
+    ["*", weights.buildings, min1(["/", g("b"), s.buildings.full_at])],
+    ["*", weights.commercial, g("cm")]];
+  const remote = ["all", ["<=", g("b"), R.remote_max_buildings_per_mi], ["<=", g("st"), R.remote_max_stops_per_mi], ["<=", g("cm"), R.remote_max_commercial]];
+  return ["case",
+    ["in", g("h"), ["literal", ["motorway", "motorway_link"]]], 1,
+    ["in", "_link", g("h")], 1,
+    ["all", ["has", "s"], [">", speed, R.fast_above_mph]], 1,
+    ["any", ["in", g("h"), ["literal", ["residential", "living_street"]]], ["all", ["has", "s"], ["any", ["<", speed, R.slow_below_mph], ["all", ["==", speed, R.slow_below_mph], [">=", g("b"), R.built_up_buildings_per_mi]]]]],
+    ["case", ["all", remote, [">=", g("c"), R.curvy_min_deg_per_km], ["has", "n"]], 2, remote, 1, 0],
+    [">=", score, R.great_min_score], 2, [">=", score, R.ok_min_score], 1, 0];
+}
+
+// ---------------------------------------------------------------- tile cache (IndexedDB)
+
+const db = new Promise(res => {
+  try {
+    const req = indexedDB.open("driving-live", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("tiles");
+    req.onsuccess = () => res(req.result); req.onerror = () => res(null);
+  } catch { res(null); }
+});
+async function idb(mode, fn) {
+  const d = await db; if (!d) return null;
+  return new Promise(res => { try { const r = fn(d.transaction("tiles", mode).objectStore("tiles")); r.onsuccess = () => res(r.result); r.onerror = () => res(null); } catch { res(null); } });
+}
+const tileKey = (x, y) => `v${CACHE_VERSION}/${TILE_Z}/${x}/${y}`;
+
+// ---------------------------------------------------------------- tile loading
+
+const tiles = new Map();   // key -> { state: "queued"|"loading"|"done"|"error", roads, sources }
+const queue = [], pool = [];
+let seq = 0;
+for (let i = 0; i < WORKERS; i++) pool.push({ w: new Worker("worker.js"), busy: false });
+const lon2x = lon => Math.floor((lon + 180) / 360 * 2 ** TILE_Z);
+const lat2y = lat => Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** TILE_Z);
+
+// Every visible area, nearest the center first. If too many are visible (zoomed far out),
+// load nothing new rather than part of the view; already-loaded roads stay on the map.
+let tooMany = false;
+function wanted() {
+  const b = map.getBounds(), c = map.getCenter(), cx = lon2x(c.lng), cy = lat2y(c.lat);
+  const x0 = lon2x(b.getWest()), x1 = lon2x(b.getEast()), y0 = lat2y(b.getNorth()), y1 = lat2y(b.getSouth());
+  tooMany = (x1 - x0 + 1) * (y1 - y0 + 1) > MAX_TILES;
+  if (tooMany) return [];
+  const out = [];
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.push([x, y]);
+  return out.sort((a, q) => Math.hypot(a[0] - cx, a[1] - cy) - Math.hypot(q[0] - cx, q[1] - cy));
+}
+
+async function refresh() {
+  const want = wanted(), wantKeys = new Set(want.map(([x, y]) => tileKey(x, y)));
+  // Drop queued tiles that scrolled out of view; in-flight ones finish and stay cached.
+  for (let i = queue.length - 1; i >= 0; i--) if (!wantKeys.has(queue[i].key)) { tiles.delete(queue[i].key); queue.splice(i, 1); }
+  const now = Date.now();
+  for (const [x, y] of want) { const t = tiles.get(tileKey(x, y)); if (t) t.used = now; }
+  // Keep only the most recently viewed areas in memory; the rest stay in IndexedDB for later.
+  const kept = [...tiles.values()].filter(t => t.state === "done").sort((a, b) => b.used - a.used);
+  if (kept.length > KEEP_TILES) { for (const t of kept.slice(KEEP_TILES)) tiles.delete(t.key); render(); }
+  for (const [x, y] of want) {
+    const key = tileKey(x, y);
+    if (tiles.has(key)) continue;
+    const t = { state: "queued", x, y, key, used: now };
+    tiles.set(key, t);
+    const cached = await idb("readonly", s => s.get(key));
+    if (cached) { Object.assign(t, cached, { state: "done" }); render(); continue; }
+    queue.push(t);
+  }
+  pump(); updateStatus();
+}
+
+function pump() {
+  for (const slot of pool) {
+    if (slot.busy || !queue.length) continue;
+    const t = queue.shift(), id = ++seq;
+    slot.busy = true; t.state = "loading"; t.stage = "Starting"; t.started = Date.now();
+    slot.w.onmessage = e => {
+      const m = e.data;
+      if (m.id !== id) return;
+      if (m.stage) { t.stage = m.stage; updateStatus(); return; }
+      slot.busy = false;
+      if (m.ok) {
+        Object.assign(t, { state: "done", roads: m.roads, sources: m.sources });
+        idb("readwrite", s => s.put({ roads: m.roads, sources: m.sources, at: Date.now() }, t.key));
+        render();
+      } else { t.state = "error"; t.error = m.error; console.warn("tile", t.key, m.error); }
+      pump(); updateStatus();
+    };
+    slot.w.postMessage({ id, x: t.x, y: t.y, z: TILE_Z });
+  }
+}
+
+function updateStatus() {
+  const all = [...tiles.values()], done = all.filter(t => t.state === "done").length;
+  const busy = all.filter(t => t.state === "loading" || t.state === "queued").length, err = all.filter(t => t.state === "error").length;
+  const el = document.getElementById("status"), txt = document.getElementById("statusText");
+  el.className = busy ? "busy" : err ? "err" : "";
+  const loading = all.filter(t => t.state === "loading");
+  if (busy) txt.textContent = `${done} of ${done + busy} areas ready (each ~5 km)`;
+  else if (err) txt.textContent = `${err} area${err > 1 ? "s" : ""} didn't load (${all.find(t => t.state === "error").error}). Pan to retry.`;
+  else if (tooMany) txt.textContent = "Zoom in to load roads here";
+  else txt.textContent = `${done} area${done === 1 ? "" : "s"} scored`;
+  document.getElementById("jobs").innerHTML = loading.map(t =>
+    `<li><span>${esc(t.stage)}</span><span class="num">${Math.round((Date.now() - t.started) / 1000)}s</span></li>`).join("");
+  clearTimeout(updateStatus.timer);
+  if (busy) updateStatus.timer = setTimeout(updateStatus, 1000);
+  if (!busy && err) for (const t of all) if (t.state === "error") tiles.delete(t.key);   // retried on next pan
+}
+
+// ---------------------------------------------------------------- rendering
+
+// Redrawing re-sends every road to the map, so batch tile arrivals into at most two redraws a second.
+// Sliders never come through here: they only swap the layer filters (applyWeights).
+let features = [], renderTimer = null;
+function render() {
+  if (!renderTimer) renderTimer = setTimeout(() => { renderTimer = null; draw(); }, 500);
+}
+function draw() {
+  const seen = new Set(), km = [0, 0, 0];
+  features = [];
+  for (const t of tiles.values()) if (t.state === "done") for (const f of t.roads) {
+    if (seen.has(f.properties.id)) continue;
+    seen.add(f.properties.id);
+    Object.assign(f.properties, classify(f.properties));
+    km[f.properties.k] += f.properties.l / 1000;
+    features.push(f);
+  }
+  showTotals(km);
+  map.getSource("roads")?.setData({ type: "FeatureCollection", features });
+}
+function showTotals(km) {
+  km.forEach((v, k) => document.getElementById("n" + k).textContent = features.length ? Math.round(v * 0.621371).toLocaleString() + " mi" : "");
+}
+let totalsTimer;
+function applyWeights() {
+  const e = classExpr();
+  for (const k of [0, 1, 2]) map.setFilter("r" + k, ["==", e, k]);
+  // Mile totals and the open road card are cheap to redo in JS, just not on every slider tick.
+  clearTimeout(totalsTimer);
+  totalsTimer = setTimeout(() => {
+    const km = [0, 0, 0];
+    for (const f of features) { Object.assign(f.properties, classify(f.properties)); km[f.properties.k] += f.properties.l / 1000; }
+    showTotals(km);
+    if (shownProps) { const p = shownProps; shown = null; showCard(p); }
+  }, 150);
+}
+
+const BASEMAPS = {
+  // OSM tiles inverted and desaturated (Carto's dark tiles now need an API key).
+  dark: { tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], attribution: "© OpenStreetMap contributors", maxzoom: 19, bg: "#18181b",
+    paint: { "raster-brightness-min": 0.9, "raster-brightness-max": 0.08, "raster-saturation": -0.85, "raster-contrast": 0.1 } },
+  streets: { tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], attribution: "© OpenStreetMap contributors", maxzoom: 19, bg: "#f2efe9" },
+  satellite: { tiles: ["https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"], attribution: "USGS The National Map", maxzoom: 16, bg: "#111" },
+  none: { bg: "#18181b" },
+};
+let basemap = recall("basemap") in BASEMAPS ? recall("basemap") : "dark";
+
+// Shared kevinschaich byline from the runtime kit (kevinschaich/kevinschaich, packages/components).
+// Loaded with import() so the map still works if kevinschaich.com is unreachable.
+// Byline and data credits live together in the map's attribution control.
+const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+const CREDITS = [
+  '<span data-ks-byline></span>',
+  `Roads © ${link("https://www.openstreetmap.org/copyright", "OpenStreetMap")} via Postpass / OSM API / Overpass`,
+  `buildings ${link("https://overturemaps.org", "Overture Maps")}`,
+  `land cover ${link("https://esa-worldcover.org", "ESA WorldCover 2021")}`,
+  `elevation ${link("https://mapterhorn.com", "Mapterhorn")}`,
+];
+
+const narrow = matchMedia("(max-width: 640px)").matches;
+const home = recall("view") || { center: [-105.0166, 39.6133], zoom: 12 };
+const map = new maplibregl.Map({
+  // hash: the URL carries #zoom/lat/lon, updated when the map stops moving, so links reopen the same view
+  // (it takes precedence over the last view remembered in this browser).
+  container: "map", center: home.center, zoom: home.zoom, hash: true, dragRotate: false, attributionControl: { compact: true, customAttribution: CREDITS },
+  style: { version: 8, sources: {}, layers: [{ id: "bg", type: "background", paint: { "background-color": "#18181b" } }] },
+});
+map.touchZoomRotate.disableRotation();
+// The attribution control re-renders on style changes, so refill the byline each time.
+import("https://kevinschaich.com/kit/v1/byline.js").then(({ bylineHTML }) => {
+  const fill = () => document.querySelectorAll("[data-ks-byline]:empty").forEach((el) => (el.innerHTML = bylineHTML()));
+  fill();
+  map.on("styledata", fill);
+}).catch(() => {});
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false } }), "top-right");
+
+function setBasemap(name) {
+  basemap = name; store("basemap", name);
+  document.documentElement.dataset.theme = name === "streets" ? "light" : "dark";
+  document.querySelectorAll("#basemap button").forEach(b => b.setAttribute("aria-pressed", b.dataset.b === name));
+  const B = BASEMAPS[name];
+  if (map.getLayer("base")) map.removeLayer("base");
+  if (map.getSource("base")) map.removeSource("base");
+  map.setPaintProperty("bg", "background-color", B.bg);
+  if (B.tiles) {
+    map.addSource("base", { type: "raster", tiles: B.tiles, tileSize: 256, maxzoom: B.maxzoom, attribution: B.attribution });
+    map.addLayer({ id: "base", type: "raster", source: "base", paint: B.paint || { "raster-opacity": 0.85 } }, "hl");
+  }
+}
+
+map.on("load", () => {
+  map.addSource("roads", { type: "geojson", data: { type: "FeatureCollection", features: [] }, promoteId: "id" });
+  const W = [[.4, 1.2, 3], [1, 2.4, 6], [1.2, 2.8, 7]];   // width at zoom 8 / 12 / 16: bad roads stay thin
+  for (const k of [0, 1, 2]) map.addLayer({ id: "r" + k, type: "line", source: "roads", filter: ["==", classExpr(), k],
+    layout: { "line-cap": "round", "line-join": "round", visibility: (recall("hidden") || []).includes(k) ? "none" : "visible" },
+    paint: { "line-color": COLORS[k], "line-opacity": k ? 1 : .9,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, W[k][0], 12, W[k][1], 16, W[k][2]] } });
+  map.addLayer({ id: "hl", type: "line", source: "roads", filter: ["==", ["id"], -1], layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#fff", "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3, 16, 10], "line-opacity": .55 } }, "r0");
+  setBasemap(basemap);
+  render();
+  refresh();
+});
+
+// Fit a place on screen with at least ~5 km of view around it (many results are a single point).
+// Large places can span more areas than we load at once; zoom in on the middle until they fit.
+function fitPlace(s, w, n, e) {
+  const pad = Math.max(0, 0.03 - (n - s) / 2);
+  map.fitBounds([[w - pad, s - pad], [e + pad, n + pad]], { padding: narrow ? 20 : { top: 40, bottom: 40, left: 340, right: 40 }, maxZoom: 14, animate: false });
+  for (let i = 0; i < 20 && (wanted(), tooMany); i++) map.setZoom(map.getZoom() + 0.25);
+}
+
+map.on("moveend", () => { store("view", { center: map.getCenter().toArray(), zoom: map.getZoom() }); refresh(); });
+
+// ---------------------------------------------------------------- controls
+
+document.querySelectorAll(".lg input").forEach(cb => {
+  cb.checked = !(recall("hidden") || []).includes(+cb.dataset.k);
+  cb.addEventListener("change", () => {
+    map.setLayoutProperty("r" + cb.dataset.k, "visibility", cb.checked ? "visible" : "none");
+    store("hidden", [...document.querySelectorAll(".lg input")].filter(c => !c.checked).map(c => +c.dataset.k));
+  });
+});
+document.querySelectorAll("#basemap button").forEach(b => b.addEventListener("click", () => setBasemap(b.dataset.b)));
+
+const sliders = document.getElementById("sliders");
+function buildSliders() {
+  sliders.innerHTML = `<p class="hint">How much each one counts toward a road's score out of 100. Slide right to care more, all the way left to ignore it.</p>` +
+    SLIDERS.map(([k, label, max]) => { const v = Math.abs(weights[k]);
+      return `<label class="sl"><span>${label}</span><input type="range" min="0" max="${max}" step="1" value="${v}" data-k="${k}"><output>${v ? (SIGN[k] > 0 ? "+" : "−") + v : "off"}</output></label>`; }).join("");
+  const fill = inp => inp.style.setProperty("--p", inp.value / inp.max * 100 + "%");
+  sliders.querySelectorAll("input").forEach(fill);
+  sliders.querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
+    fill(inp);
+    const k = inp.dataset.k, v = +inp.value;
+    weights[k] = SIGN[k] * v;
+    inp.nextElementSibling.textContent = v ? (SIGN[k] > 0 ? "+" : "−") + v : "off";
+    store("weights", weights);
+    applyWeights();
+  }));
+}
+buildSliders();
+document.getElementById("reset").addEventListener("click", () => {
+  weights = Object.fromEntries(SLIDERS.map(([k]) => [k, DEFAULTS.score[k].points])); store("weights"); buildSliders(); applyWeights();
+});
+document.getElementById("clear").addEventListener("click", async () => {
+  await idb("readwrite", s => s.clear());
+  for (const [k, t] of tiles) if (t.state === "done" || t.state === "error") tiles.delete(k);
+  render();
+  refresh();
+});
+
+// ---------------------------------------------------------------- search
+// Photon (OSM-based, built for search-as-you-type; Nominatim's policy forbids autocomplete),
+// biased toward the current map view. ZIP codes work too (Photon returns their outline).
+
+const q = document.getElementById("q"), results = document.getElementById("results");
+let hits = [], active = -1, searchCtrl = null, searchTimer;
+function showResults(list, message) {
+  hits = list; active = list.length ? 0 : -1;
+  results.innerHTML = message ? `<li class="empty">${esc(message)}</li>` : list.map((h, i) =>
+    `<li role="option" id="opt${i}" aria-selected="${i === active}" data-i="${i}"><span>${esc(h.name)}</span><small>${esc(h.detail)}</small></li>`).join("");
+  results.hidden = !message && !list.length;
+  q.setAttribute("aria-expanded", String(!results.hidden));
+  q.setAttribute("aria-activedescendant", active >= 0 ? "opt" + active : "");
+}
+function highlight(i) {
+  active = i;
+  results.querySelectorAll("li[role=option]").forEach((li, j) => li.setAttribute("aria-selected", String(j === i)));
+  q.setAttribute("aria-activedescendant", "opt" + i);
+}
+async function search(text) {
+  searchCtrl?.abort(); searchCtrl = new AbortController();
+  const c = map.getCenter();
+  try {
+    const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(text)}&limit=6&lang=en&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`, { signal: searchCtrl.signal });
+    const d = await r.json();
+    const list = d.features.map(f => {
+      const p = f.properties, [lon, lat] = f.geometry.coordinates;
+      const street = p.housenumber && p.street ? `${p.housenumber} ${p.street}` : p.street;
+      const name = p.name || street || p.city || p.postcode || "Unnamed place";
+      const detail = [p.name && street !== name ? street : null, p.city !== name ? p.city : null, p.state, p.countrycode !== "US" ? p.country : null].filter(Boolean).join(", ");
+      return { name, detail, lat, lon, extent: p.extent };
+    });
+    showResults(list, list.length ? null : "No places found");
+  } catch (err) { if (err.name !== "AbortError") showResults([], "Search isn't available right now"); }
+}
+function choose(h) {
+  showResults([]); q.blur();
+  if (h.extent) { const [w, n, e, s] = h.extent; fitPlace(s, w, n, e); }
+  else fitPlace(h.lat, h.lon, h.lat, h.lon);
+  refresh();
+}
+q.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const text = q.value.trim();
+  if (text.length < 3) { searchCtrl?.abort(); showResults([]); return; }
+  searchTimer = setTimeout(() => search(text), 250);
+});
+q.addEventListener("keydown", e => {
+  if (e.key === "ArrowDown" && hits.length) { e.preventDefault(); highlight((active + 1) % hits.length); }
+  else if (e.key === "ArrowUp" && hits.length) { e.preventDefault(); highlight((active - 1 + hits.length) % hits.length); }
+  else if (e.key === "Escape") { showResults([]); q.blur(); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    if (hits[active]) choose(hits[active]);
+  }
+});
+results.addEventListener("mousedown", e => { const li = e.target.closest("li[data-i]"); if (li) { e.preventDefault(); choose(hits[+li.dataset.i]); } });
+q.addEventListener("blur", () => setTimeout(() => showResults([]), 100));
+
+// ---------------------------------------------------------------- road card
+
+const card = document.getElementById("card"), cardBody = document.getElementById("cardBody");
+let shown = null, shownProps = null;
+function showCard(p) {
+  if (!p) { card.classList.remove("show"); map.setFilter("hl", ["==", ["id"], -1]); shown = shownProps = null; return; }
+  if (shown === p.id) return;
+  // Rendered features carry the class from the last data upload; recompute with the current weights.
+  shown = p.id; shownProps = p; Object.assign(p, classify(p));
+  map.setFilter("hl", ["==", ["id"], p.id]);
+  const f = typeof p.f === "string" ? JSON.parse(p.f) : p.f;
+  const why = p.r === "score" ? (f.length ? f.map(x => FACTORS[x]).join(", ") : "nothing stands out") : RULES[p.r];
+  const n1 = v => Math.round(v * 10) / 10;
+  cardBody.innerHTML = `
+    <h3>${esc(p.n || "Unnamed " + p.h.replace(/_/g, " ") + " road")}</h3>
+    <div class="badges"><span class="badge" style="background:${COLORS[p.k]}">${CLASS[p.k]}</span>${p.r === "score" ? `<span class="badge outline">score ${p.sc}/100</span>` : ""}</div>
+    <p>${why.charAt(0).toUpperCase() + why.slice(1)}${why.endsWith(".") ? "" : "."}</p>
+    <dl>
+      <dt>Speed limit</dt><dd>${p.s != null ? `${p.s} mph${p.ss === "street" ? " (on this street)" : ""}` : "not in data"}</dd>
+      <dt>Lights &amp; stops</dt><dd>${n1(p.st)} / mi</dd>
+      <dt>Turn-offs</dt><dd>${n1(p.a)} / mi</dd>
+      <dt>Buildings</dt><dd>${Math.round(p.b)} / mi</dd>
+      <dt>Commercial</dt><dd>${Math.round(p.cm * 100)}% of frontage</dd>
+      <dt>Open land</dt><dd>${p.nt == null ? "unavailable" : Math.round(p.nt * 100) + "% of frontage"}</dd>
+      <dt>Curves</dt><dd>${Math.round(p.c)}° / km</dd>
+      <dt>Hills</dt><dd>${Math.round(p.e)} m / km</dd>
+    </dl>
+    <a href="https://www.openstreetmap.org/way/${p.id}" target="_blank" rel="noopener">Open in OpenStreetMap ↗</a>
+    <div class="pin-hint">Click the road to keep this open.</div>`;
+  card.classList.add("show");
+}
+function pick(point, pad) {
+  const layers = ["r2", "r1", "r0"].filter(id => map.getLayoutProperty(id, "visibility") !== "none");
+  const hits = map.queryRenderedFeatures([[point.x - pad, point.y - pad], [point.x + pad, point.y + pad]], { layers });
+  return hits.length ? hits[0].properties : null;
+}
+const hoverable = matchMedia("(hover: hover)").matches;
+// Hovering previews a road; clicking one pins its card (hover stops changing it) until the × is clicked.
+let pinned = false;
+if (hoverable) map.on("mousemove", e => {
+  const p = pick(e.point, 4);
+  map.getCanvas().style.cursor = p ? "pointer" : "";
+  if (!pinned) showCard(p);
+});
+map.on("click", e => {
+  const p = pick(e.point, narrow ? 12 : 5);
+  if (!p) return;
+  pinned = true; card.classList.add("pinned");
+  showCard(p);
+});
+card.querySelector(".x").addEventListener("click", () => { pinned = false; card.classList.remove("pinned"); showCard(null); });
+</script>

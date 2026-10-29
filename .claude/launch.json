@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "live", "runtimeExecutable": "python3", "runtimeArgs": ["-m", "http.server", "8765", "-d", "live"], "port": 8765 }
+  ]
+}
