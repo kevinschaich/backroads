@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backroads | by kevinschaich</title>
+<meta name="description" content="Find the roads worth driving, anywhere.">
+<link rel="icon" href="https://kevinschaich.com/icon/backroads.png">
+<meta property="og:title" content="Backroads | by kevinschaich">
+<meta property="og:description" content="Find the roads worth driving, anywhere.">
+<meta property="og:image" content="https://kevinschaich.com/og/backroads.png">
+<meta property="og:url" content="https://kevinschaich.com/project/backroads/">
+<meta name="twitter:card" content="summary_large_image">
+<script>
+  // The canonical address is kevinschaich.com/project/backroads/. Overture's CDN refuses requests from
+  // *.vercel.app pages, so send visitors of the raw production URL there (keeping the map position).
+  if (location.hostname === "backroads-flame.vercel.app")
+    location.replace("https://kevinschaich.com/project/backroads/" + location.hash);
+</script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="./src/main.tsx"></script>
+</body>
+</html>

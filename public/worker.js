@@ -1,7 +1,7 @@
 // Fetches and measures one z13 tile (~5 km) of roads, entirely in the browser: every road owned by
 // the tile gets its ~1 mile corridor metrics. Scoring stays on the main thread so weight sliders never
 // refetch.
-importScripts("https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js", "https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js");
+importScripts("https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js");
 
 const CELL = 25;          // raster resolution in meters
 const NEAR = 3;           // "alongside the road" = within 3 cells
@@ -19,6 +19,11 @@ const OPEN_COVER = new Set([10, 20, 30, 40, 60, 90, 95, 100]);
 const KMH_PER_MPH = 1.609344;
 
 self.onmessage = async e => {
+  if (e.data.type === "buildings") {          // a building tile the page fetched for us
+    const p = pendingTiles.get(e.data.rid); pendingTiles.delete(e.data.rid);
+    if (e.data.error) p?.reject(new Error(e.data.error)); else p?.resolve(e.data.list);
+    return;
+  }
   const { id, x, y, z } = e.data;
   const stage = s => postMessage({ id, stage: s });
   try {
@@ -57,6 +62,21 @@ function simplify(pts, tol) {
     if (best > tol) { keep[bi] = 1; stack.push([a, bi], [bi, b]); }
   }
   return [...keep.keys()].filter(i => keep[i]);
+}
+
+// Hairpins: switchbacks where the road turns >= 100° between the 100 m before a point and the 100 m after it,
+// on the 25 m resampled points. Each bend counts once. Tuned so Old La Honda and Kings Mountain roads read
+// ~1/mi and curvy-but-open roads like Skyline read 0.
+function hairpins(pts) {
+  const W = 4;
+  let count = 0;
+  for (let i = W; i < pts.length - W; i++) {
+    const a = Math.atan2(pts[i][1] - pts[i - W][1], pts[i][0] - pts[i - W][0]);
+    const b = Math.atan2(pts[i + W][1] - pts[i][1], pts[i + W][0] - pts[i][0]);
+    let d = Math.abs(b - a); if (d > Math.PI) d = 2 * Math.PI - d;
+    if (d >= 100 * Math.PI / 180) { count++; i += 2 * W; }
+  }
+  return count;
 }
 
 function turningDegrees(pts) {
@@ -277,115 +297,16 @@ out geom qt;`;
 }
 
 // ---------------------------------------------------------------- Overture buildings
-// OSM is missing house footprints in many suburbs (whole Jefferson County subdivisions read as
-// 0 buildings/mi), so buildings come from Overture, which adds Microsoft and Google footprints,
-// so suburbs read as built up. Read from Overture's PMTiles (z14 vector tiles) by range request.
-const OVERTURE_BUILDINGS = "https://tiles.overturemaps.org/2026-10-21.0/buildings.pmtiles";
-let overtureArchive = null;
-
-// Minimal Mapbox Vector Tile reader: [lat, lon, area m²] for each polygon in the "building" layer.
-function mvtBuildings(buf, z, x, y) {
-  const b = new Uint8Array(buf), out = [];
-  let pos = 0;
-  const varint = () => { let v = 0, s = 1, c; do { c = b[pos++]; v += (c & 0x7f) * s; s *= 128; } while (c & 0x80); return v; };
-  const skip = wt => { if (wt === 0) varint(); else if (wt === 1) pos += 8; else if (wt === 2) { const L = varint(); pos += L; } else if (wt === 5) pos += 4; };
-  const zz = n => (n >>> 1) ^ -(n & 1);
-  while (pos < b.length) {
-    const tag = varint();
-    if (tag >> 3 !== 3 || (tag & 7) !== 2) { skip(tag & 7); continue; }
-    const layerEnd = varint() + pos;
-    let name = "", extent = 4096;
-    const geoms = [];
-    while (pos < layerEnd) {
-      const t = varint(), f = t >> 3;
-      if (f === 1) { const L = varint(); name = new TextDecoder().decode(b.subarray(pos, pos + L)); pos += L; }
-      else if (f === 5) extent = varint();
-      else if (f === 2) {
-        const featEnd = varint() + pos;
-        let type = 0, g = null;
-        while (pos < featEnd) {
-          const ft = varint(), ff = ft >> 3;
-          if (ff === 3) type = varint();
-          else if (ff === 4) { const L = varint(); g = [pos, pos + L]; pos += L; }
-          else skip(ft & 7);
-        }
-        if (type === 3 && g) geoms.push(g);
-      } else skip(t & 7);
-    }
-    if (name !== "building") { pos = layerEnd; continue; }
-    const save = pos, n2 = 2 ** z;
-    for (const [g0, g1] of geoms) {
-      pos = g0;
-      let cx = 0, cy = 0, sx = 0, sy = 0, cnt = 0, area = 0, ring = [];
-      const flush = () => {
-        if (ring.length < 3) return;
-        let a = 0;
-        for (let i = 0; i < ring.length; i++) { const [x1, y1] = ring[i], [x2, y2] = ring[(i + 1) % ring.length]; a += x1 * y2 - x2 * y1; }
-        area += a / 2;     // outer rings and holes have opposite signs, so this nets out holes
-        if (!cnt) for (const [px, py] of ring) { sx += px; sy += py; cnt++; }
-      };
-      while (pos < g1) {
-        const cmd = varint(), id = cmd & 7, count = cmd >> 3;
-        if (id === 7) { flush(); ring = []; continue; }
-        for (let i = 0; i < count; i++) { cx += zz(varint()); cy += zz(varint()); if (id === 1) { flush(); ring = []; } ring.push([cx, cy]); }
-      }
-      flush();
-      if (!cnt) continue;
-      const lon = (x + sx / cnt / extent) / n2 * 360 - 180;
-      const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + sy / cnt / extent) / n2))) * 180 / Math.PI;
-      const m = 40075016 * Math.cos(lat * Math.PI / 180) / n2 / extent;   // meters per tile unit
-      out.push([lat, lon, Math.abs(area) * m * m]);
-    }
-    pos = Math.max(save, layerEnd);
-  }
-  return out;
-}
-
-// Overture's CDN drops some parallel range requests and answers 403/429 when a visitor asks too fast,
-// so retry with backoff (much longer when throttled). pmtiles caches a failed header or directory
-// fetch inside the archive object, so a retry starts from a fresh archive.
-async function withRetry(fn, tries = 4) {
-  for (let i = 0; ; i++) {
-    try { return await fn(); }
-    catch (err) {
-      if (i >= tries - 1) throw err;
-      overtureArchive = null;
-      const throttled = /\b(403|429)\b/.test(String(err && err.message));
-      await new Promise(r => setTimeout(r, (throttled ? 3000 : 400) * 2 ** i));
-    }
-  }
-}
-
-// At most a few Overture requests in flight per worker.
-let overtureSlots = 4;
-const overtureWaiting = [];
-async function overtureLimit(fn) {
-  if (overtureSlots > 0) overtureSlots--; else await new Promise(r => overtureWaiting.push(r));
-  try { return await fn(); }
-  finally { const next = overtureWaiting.shift(); next ? next() : overtureSlots++; }
-}
-
-// Decoded building tiles, shared by all workers and kept across visits, so neighboring areas
-// (which overlap the same z14 tiles) download each tile once. Stored as flat [lat, lon, area, ...].
-const buildingDb = new Promise(res => {
-  try {
-    const req = indexedDB.open("backroads-overture", 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("tiles");
-    req.onsuccess = () => res(req.result); req.onerror = () => res(null);
-  } catch { res(null); }
-});
-async function buildingStore(mode, fn) {
-  const d = await buildingDb; if (!d) return null;
-  return new Promise(res => { try { const r = fn(d.transaction("tiles", mode).objectStore("tiles")); r.onsuccess = () => res(r.result); r.onerror = () => res(null); } catch { res(null); } });
-}
-async function buildingTile(z, x, y) {
-  const key = `${OVERTURE_BUILDINGS}/${z}/${x}/${y}`;
-  const hit = await buildingStore("readonly", s => s.get(key));
-  if (hit) { const out = []; for (let i = 0; i < hit.length; i += 3) out.push([hit[i], hit[i + 1], hit[i + 2]]); return out; }
-  const t = await overtureLimit(() => withRetry(() => (overtureArchive ||= new pmtiles.PMTiles(OVERTURE_BUILDINGS)).getZxy(z, x, y)));
-  const list = t ? mvtBuildings(t.data, z, x, y) : [];
-  buildingStore("readwrite", s => s.put(Float64Array.from(list.flat()), key));
-  return list;
+// Buildings come from Overture (OSM lacks house footprints in many suburbs). The page fetches each z14 tile once
+// for all workers (src/buildings.ts) and sends it here as a flat [lat, lon, area m², ...] array.
+let tileRequests = 0;
+const pendingTiles = new Map();
+function buildingTile(z, x, y) {
+  const rid = ++tileRequests;
+  return new Promise((resolve, reject) => {
+    pendingTiles.set(rid, { resolve, reject });
+    postMessage({ type: "buildings", rid, z, x, y });
+  });
 }
 
 async function overtureBuildings(s, w, n, e) {
@@ -394,7 +315,13 @@ async function overtureBuildings(s, w, n, e) {
   for (let x = tx(w); x <= tx(e); x++) for (let y = ty(n); y <= ty(s); y++)
     jobs.push(buildingTile(Z, x, y));
   // A building crossing a tile edge appears in both tiles; the double count is small and even.
-  return (await Promise.all(jobs)).flat().filter(([lat, lon]) => lat >= s && lat <= n && lon >= w && lon <= e);
+  const out = [];
+  for (const flat of await Promise.all(jobs))
+    for (let i = 0; i < flat.length; i += 3) {
+      const lat = flat[i], lon = flat[i + 1];
+      if (lat >= s && lat <= n && lon >= w && lon <= e) out.push([lat, lon, flat[i + 2]]);
+    }
+  return out;
 }
 
 let sasToken = null;
@@ -454,7 +381,11 @@ async function elevation(s, w, n, e) {
 
 // ---------------------------------------------------------------- measure
 
+// Time how long each source takes, reported with the area's results so slow sources are easy to spot.
+const timed = (t, name, p) => { const t0 = performance.now(); return p.finally(() => { t[name] = Math.round(performance.now() - t0); }); };
+
 async function measureTile(tx, ty, tz, stage) {
+  const t = {}, t0 = performance.now();
   const tn = tileLat(ty, tz), ts = tileLat(ty + 1, tz), tw = tileLon(tx, tz), te = tileLon(tx + 1, tz);
   const lat0 = (tn + ts) / 2, lon0 = (tw + te) / 2, proj = projection(lat0, lon0);
   const dLat = BUFFER / 110540, dLon = BUFFER / (111320 * Math.cos(lat0 * Math.PI / 180));
@@ -463,14 +394,14 @@ async function measureTile(tx, ty, tz, stage) {
   const raster = new Raster(x0, y1, Math.ceil((x1 - x0) / CELL), Math.ceil((y1 - y0) / CELL));
 
   // Land cover and elevation load alongside the map data.
-  const coverP = landcover(raster, proj, s, w, n, e).catch(err => (console.warn("land cover:", err), null));
-  const elevP = elevation(s, w, n, e).catch(err => (console.warn("elevation:", err), null));
+  const coverP = timed(t, "landcover", landcover(raster, proj, s, w, n, e)).catch(err => (console.warn("land cover:", err), null));
+  const elevP = timed(t, "elevation", elevation(s, w, n, e)).catch(err => (console.warn("elevation:", err), null));
   let overtureError = "";
-  const overtureP = overtureBuildings(s, w, n, e).catch(err => (overtureError = String(err && err.message || err), null));
+  const overtureP = timed(t, "buildings", overtureBuildings(s, w, n, e)).catch(err => (overtureError = String(err && err.message || err), null));
   stage("Postpass · connecting");
   // Only ask OSM for buildings if Overture already failed; otherwise it's wasted download.
   const early = await Promise.race([overtureP, new Promise(r => setTimeout(() => r(undefined), 50))]);
-  const osm = await fetchArea(s, w, n, e, stage, proj, early === null);
+  const osm = await timed(t, "roads", fetchArea(s, w, n, e, stage, proj, early === null));
   const overture = await overtureP;
   if (overture) { osm.buildings = overture; osm.buildingSource = "Overture"; }
   else if (early === null) osm.buildingSource = "OSM";
@@ -478,6 +409,7 @@ async function measureTile(tx, ty, tz, stage) {
   else throw new Error(`Overture buildings didn't load: ${overtureError || "unknown error"}`);
   stage(`Measuring roads (data from ${osm.provider})`);
   const [cover, elev] = await Promise.all([coverP, elevP]);
+  const tMeasure = performance.now();
 
   const ways = osm.roads, points = osm.points, polys = osm.polys;
   const grid = new Float32Array(raster.w * raster.h), big = new Uint8Array(grid.length);
@@ -539,6 +471,7 @@ async function measureTile(tx, ty, tz, stage) {
     roads.push({
       way: wy, xy, length, n: pts.length, bsum, com, nat, stops, access, relief,
       turning: turningDegrees(simplify(xy, 2).map(i => xy[i])),
+      hairpins: hairpins(pts),
       speed: parseMaxspeed(t.maxspeed),
       own: mid.lat >= ts && mid.lat < tn && mid.lon >= tw && mid.lon < te,
     });
@@ -580,6 +513,7 @@ async function measureTile(tx, ty, tz, stage) {
       id: rd.way.id, h: rd.way.tags.highway, l: Math.round(rd.length),
       c: sum("turning") / km, e: sum("relief") / km, st: sum("stops") / mi, a: sum("access") / mi,
       b: sum("bsum") / nn / boxM * 1609.344, cm: sum("com") / nn, nt: nature ? sum("nat") / nn : null,
+      cl: Math.round(L), hp: sum("hairpins") / mi,
     };
     if (speed != null) { p.s = Math.round(speed); p.ss = src; }
     if (k) p.n = k;
@@ -587,5 +521,6 @@ async function measureTile(tx, ty, tz, stage) {
       coordinates: keep.map(j => [+g[j].lon.toFixed(5), +g[j].lat.toFixed(5)]) } });
   });
 
-  return { roads: out, sources: { provider: osm.provider, landcover: !!nature, elevation: !!elev, buildings: osm.buildings.length, buildingSource: osm.buildingSource } };
+  t.measure = Math.round(performance.now() - tMeasure); t.total = Math.round(performance.now() - t0);
+  return { roads: out, timings: t, sources: { provider: osm.provider, landcover: !!nature, elevation: !!elev, buildings: osm.buildings.length, buildingSource: osm.buildingSource } };
 }

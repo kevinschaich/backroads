@@ -3,52 +3,54 @@
 # Backroads
 
 A map that colors every road great / ok / bad for driving, scored from open data. Slug `backroads`, title
-`Backroads | by kevinschaich`, canonical URL `kevinschaich.com/project/backroads`.
+`Backroads | by kevinschaich`, canonical URL `kevinschaich.com/project/backroads/`.
 
-Owner preferences: measured open data only (never guess values like speed limits), phone-friendly, minimal
-effort for the owner to see results.
+Owner preferences: measured open data only (never guess values like speed limits, traffic or road surface),
+phone-friendly, minimal effort for the owner to see results.
 
-## Live version (`live/`): the product
+## Layout
 
-Static page, no build step: `live/index.html` + `live/worker.js`. Run locally with
-`python3 -m http.server 8765 -d live` (also in `.claude/launch.json`).
+Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run with `bun install && bun dev`
+(also in `.claude/launch.json`).
 
-- The browser fetches and scores ~5 km areas (z13 tiles) on demand in Web Workers. Every visible area loads;
-  more than 100 visible → "Zoom in". Only the ~140 most recently viewed areas stay in memory.
+- `src/engine.ts`: MapLibre, area loading, the IndexedDB cache and the road layers, outside React. React reads
+  its snapshot (`subscribe`/`getSnapshot`). In dev it's on `window.engine` for poking at.
+- `src/scoring.ts`: the rules and weights. `classify()` (road card, mile totals) and `classExpr()` (a MapLibre
+  expression for the map colors, so sliders recolor on the GPU without re-sending data) must stay in sync.
+- `src/buildings.ts`: Overture buildings, fetched once per z14 tile for all workers and cached.
+- `public/worker.js`: fetches and measures one ~5 km area (z13 tile). Plain JS, served as a file (it loads
+  geotiff.js with `importScripts`). Bump `CACHE_VERSION` in `src/engine.ts` whenever its measurements change.
+- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`: the UI.
+
+## Data and loading
+
+- Every visible area loads, nearest first, in up to 6 workers; more than 100 visible → "Zoom in". The ~140
+  most recently viewed areas stay in memory. Loading is network-bound (measuring takes ~20 ms an area).
 - Map data: Postpass (`postpass.geofabrik.de`), then the OSM editing API, then `overpass-api.de`, each with a
   deadline; a 429 benches a provider for 60 s. **Never use maps.mail.ru or overpass.private.coffee** (owner
   asked to remove them). Postpass has no node ids, so junctions and signals match by exact coordinates.
-- Buildings: Overture PMTiles (`tiles.overturemaps.org/<release>/buildings.pmtiles`, z14), not OSM. OSM lacks
-  house footprints in many suburbs, which made whole subdivisions read 0 buildings/mi and score Great. An
-  area fails and retries rather than scoring without buildings.
-- Land cover: ESA WorldCover via a Planetary Computer SAS token and geotiff.js windowed reads.
-  Elevation: Mapterhorn Terrarium tiles (`tiles.mapterhorn.com/{z}/{x}/{y}.webp`, 512 px).
-- Measurements cache in IndexedDB under `v{CACHE_VERSION}/…`; bump `CACHE_VERSION` whenever worker
-  measurements change.
-- Scoring runs on the main thread, twice: `classify()` in JS (road card, mile totals) and `classExpr()` as a
-  MapLibre expression (map colors, so sliders recolor on the GPU without re-sending data). Keep them in sync.
-- Basemaps: Dark (OSM tiles inverted in MapLibre; Carto now needs an API key), Streets (OSM), Satellite (USGS),
-  None. Overlays are dark except on Streets.
-- Search: Photon (`photon.komoot.io`), which allows search-as-you-type (Nominatim's policy forbids it).
-  The URL carries `#zoom/lat/lon`, updated when the map stops moving.
+- Buildings: Overture PMTiles, not OSM (OSM lacks house footprints in many suburbs). An area fails and retries
+  rather than scoring without buildings. Overture's CDN answers 403 to `*.vercel.app` pages, so the deployed
+  site only works at the kevinschaich.com address; `index.html` redirects the raw vercel.app URL there.
+- Land cover: ESA WorldCover via a Planetary Computer SAS token and geotiff.js windowed reads. Elevation:
+  Mapterhorn Terrarium tiles.
+- Both IndexedDB caches give up after 2 s if opening stalls, rather than blocking every area.
+- No free source exists for traffic or road surface, so neither is scored.
 
 ## Scoring rules
 
-Each road is measured over a ~1 mile same-name corridor (stops/mi, turn-offs/mi, buildings/mi, commercial
-frontage, open land, curves °/km, hills m/km), then scored with the weights in `DEFAULTS` in `live/index.html`:
+Each road is measured over its same-name stretch (up to ~1 mile): lights and stops, turn-offs, buildings,
+commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m each side) and stretch length.
 
-- freeway, ramp, or posted >55 mph → ok
-- residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
-  ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok
-- everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
+- Ramps → bad (never a drive in themselves, and blips at map scale).
+- Freeways (motorway, or posted >55 mph) → scored only on curves, hills, open land, buildings and commercial:
+  ≥40 ok, else bad, never great. I-280 on the Peninsula reads ok, US-101 bad.
+- Residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
+  ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok.
+- Everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
+- Then length: a stretch under 800 m can't be great, under 200 m is bad.
+- Bad roads are hidden by default; "Avoid hairpins" is off by default (0 points).
 
-Spot checks that should keep holding: Broadway, Federal, Bowles, University ~100% bad; High Grade, Kuehster,
-Turkey Creek, Parmalee Gulch, Lookout Mountain, Bear Creek Rd mostly great; C-470 all ok; Stanford's Campus
-Drive and Ken Caryl's South Continental Divide Rd bad.
-
-## Approved exceptions
-
-- **Stack (Vite + React + TypeScript + Tailwind 4):** Backroads is a no-build static page in `live/` using the
-  runtime kit, so its `vercel.json` sets `framework: null`, no install or build, `outputDirectory: "live"`.
-  Why: it predates the stack rule, which keeps no-build pages on the runtime kit until they need React
-  components. Recorded 2026-10-28.
+Spot checks that should keep holding: Broadway, Federal, Bowles ~100% bad; Turkey Creek, Parmalee Gulch, Bear
+Creek Rd, mostly Lookout Mountain great; C-470 ok; Stanford's Campus Drive and Ken Caryl's South Continental
+Divide Rd bad; I-280 ok and US-101 bad on the Peninsula.

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@import "@kevinschaich/components/theme.css";
+@import "@kevinschaich/components/styles.css";
+@import "maplibre-gl/dist/maplibre-gl.css";
+@source "../node_modules/@kevinschaich/components/dist";
+
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+body {
+    background: var(--background);
+}

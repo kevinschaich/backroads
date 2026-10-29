@@ -6,5 +6,3 @@ on:
 jobs:
   checks:
     uses: kevinschaich/kevinschaich/.github/workflows/project.yml@main
-    with:
-      html: live/index.html
