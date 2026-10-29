@@ -49,10 +49,11 @@ commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m 
 - Residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
   ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok.
 - Everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
-- Then connectivity (`src/smooth.ts`, after scoring): along each named road, any run of OK/Great segments
-  shorter than 800 m becomes bad (stops flicker where neighboring segments straddle a threshold), and remote
-  residential roads that dead-end are bad. Both skip roads reaching areas that aren't loaded yet. While a
-  slider moves the map recolors from `classExpr()`; once it settles it switches to the smoothed classes.
+- Then connectivity (`src/smooth.ts`): every colored stretch on the map is at least 1 km of continuous road.
+  Along each road (same name through intersections; unnamed roads where exactly two segments meet), any run
+  of one class shorter than 1 km takes the class of the road around it; a short road on its own is bad.
+  Remote residential roads that dead-end are bad. Runs reaching unloaded areas are left alone. While a slider
+  moves the map recolors from `classExpr()`; once it settles it switches to the smoothed classes.
 - Bad roads are hidden by default; "Avoid hairpins" is off by default (0 points).
 
 Spot checks that should keep holding: Broadway, Federal, Bowles ~100% bad; Turkey Creek, Parmalee Gulch, Bear

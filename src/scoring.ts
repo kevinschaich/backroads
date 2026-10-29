@@ -33,8 +33,8 @@ export const RULES = {
     curvy_min_deg_per_km: 120,
     great_min_score: 62,
     ok_min_score: 40,
-    // Only a real stretch is worth showing: shorter roads (stubs, driveways, blips of a good road) count as Bad.
-    min_length_m: 800,
+    // Every colored stretch on the map is at least this long; shorter pieces take the class of the road around them.
+    min_length_m: 1000,
 }
 
 /** Points each factor can add or take away, and where it maxes out. */
@@ -77,6 +77,7 @@ export const REASONS: Record<string, string> = {
     backroad_twisty: 'Slow road, but remote and twisty.',
     short: 'Too short a stretch to be worth driving to.',
     dead_end: 'Quiet road, but a dead end.',
+    continues: 'A short piece of a longer good stretch.',
 }
 export const FACTORS: Record<string, string> = {
     '+curves': 'curvy',
