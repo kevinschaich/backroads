@@ -3,5 +3,6 @@
     "name": "Backroads",
     "tagline": "Find the roads worth driving, anywhere.",
     "icon": "route",
-    "url": "https://backroads-phi.vercel.app"
+    "url": "https://backroads-phi.vercel.app",
+    "screenshot": "screenshot.jpg"
 }
