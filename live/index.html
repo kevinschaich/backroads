@@ -188,7 +188,7 @@
       <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="reset">Reset weights</button><button class="btn" id="clear">Clear cache</button></div>
     </details>
   </div>
-  <div class="sec byline"><span data-ks-byline></span></div>
+  <div class="sec byline"><span data-ks-byline="kevinschaich/backroads"></span></div>
 </div>
 
 <div id="card" class="panel" role="dialog" aria-live="polite"><button class="x icon-btn" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><div id="cardBody"></div></div>
@@ -433,7 +433,7 @@ map.touchZoomRotate.disableRotation();
 // Shared kevinschaich byline from the runtime kit (kevinschaich/kevinschaich, packages/components).
 // Loaded with import() so the map still works if kevinschaich.com is unreachable.
 import("https://kevinschaich.com/kit/v1/byline.js").then(({ bylineHTML }) => {
-  document.querySelectorAll("[data-ks-byline]:empty").forEach((el) => (el.innerHTML = bylineHTML()));
+  document.querySelectorAll("[data-ks-byline]:empty").forEach((el) => (el.innerHTML = bylineHTML(el.dataset.ksByline)));
 }).catch(() => document.querySelector(".sec.byline")?.remove());
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false } }), "top-right");
