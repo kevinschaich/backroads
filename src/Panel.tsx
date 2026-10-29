@@ -10,6 +10,7 @@ import {
     Collapsible,
     CollapsibleContent,
     CollapsibleTrigger,
+    Label,
     Separator,
     Slider,
     Tabs,
@@ -35,7 +36,7 @@ export function Panel({ engine, snap }: { engine: Engine; snap: Snapshot }) {
         >
             <CardHeader className="gap-1 pt-4">
                 <CardTitle>Backroads</CardTitle>
-                <CardDescription>Pan anywhere. Roads are fetched and scored in your browser from open data.</CardDescription>
+                <CardDescription>Pan anywhere to find roads worth driving.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4 pt-3 pb-4">
                 <Search engine={engine} />
@@ -66,7 +67,7 @@ function Legend({ engine, snap }: { engine: Engine; snap: Snapshot }) {
     return (
         <div className="flex flex-col gap-2.5">
             {LEGEND.map(({ k, label, hint }) => (
-                <label key={k} className="flex cursor-pointer items-center gap-2.5 text-sm select-none">
+                <Label key={k} className="cursor-pointer gap-2.5 font-normal select-none">
                     <Checkbox checked={!snap.hidden.includes(k)} onCheckedChange={(on) => engine.setHidden(k, !on)} />
                     <span className="h-1.5 w-5 shrink-0 rounded-full" style={{ background: COLORS[k] }} />
                     <span className="min-w-0 flex-1">
@@ -76,7 +77,7 @@ function Legend({ engine, snap }: { engine: Engine; snap: Snapshot }) {
                     <span className="font-mono text-xs text-muted-foreground tabular-nums">
                         {snap.miles[k] ? `${Math.round(snap.miles[k]).toLocaleString()} mi` : ''}
                     </span>
-                </label>
+                </Label>
             ))}
         </div>
     )

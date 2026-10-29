@@ -1,4 +1,4 @@
-import { Badge, Button, Card, CardAction, CardContent, CardHeader, CardTitle } from '@kevinschaich/components'
+import { Badge, Button, Card, CardAction, CardContent, CardHeader, CardTitle, Stat } from '@kevinschaich/components'
 import { ArrowUpRight, X } from 'lucide-react'
 import type { Engine, Snapshot } from './engine'
 import { CLASS, classify, COLORS, FACTORS, REASONS, type Weights } from './scoring'
@@ -59,14 +59,11 @@ export function RoadCard({ engine, card, weights }: { engine: Engine; card: NonN
                     {why.charAt(0).toUpperCase() + why.slice(1)}
                     {why.endsWith('.') ? '' : '.'}
                 </p>
-                <dl className="grid grid-cols-[auto_1fr] border-t text-sm">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3">
                     {rows.map(([label, value]) => (
-                        <div key={label} className="contents">
-                            <dt className="border-b py-1.5 text-muted-foreground">{label}</dt>
-                            <dd className="border-b py-1.5 text-right font-medium tabular-nums">{value}</dd>
-                        </div>
+                        <Stat key={label} size="sm" label={label} value={value} />
                     ))}
-                </dl>
+                </div>
                 <a
                     href={`https://www.openstreetmap.org/way/${p.id}`}
                     target="_blank"
