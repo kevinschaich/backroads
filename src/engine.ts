@@ -166,6 +166,12 @@ export class Engine {
         // MapLibre reports problems (e.g. its worker failing to rebuild the road data) here rather than throwing.
         this.map.on('error', (e: ErrorEvent) => console.warn('map error', e.error || e))
         this.map.on('load', () => this.onLoad())
+        // MapLibre opens the compact attribution on wide screens; start it collapsed behind its (i) button.
+        this.map.once('idle', () => {
+            const el = this.map.getContainer().querySelector<HTMLDetailsElement>('.maplibregl-ctrl-attrib')
+            el?.removeAttribute('open')
+            el?.classList.remove('maplibregl-compact-show')
+        })
         this.map.on('moveend', () => {
             store('view', { center: this.map.getCenter().toArray(), zoom: this.map.getZoom() })
             this.refresh()
