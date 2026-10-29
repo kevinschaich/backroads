@@ -205,7 +205,7 @@ export class Engine {
                 layout: { 'line-cap': 'round', 'line-join': 'round', visibility: this.snap.hidden.includes(k) ? 'none' : 'visible' },
                 paint: {
                     'line-color': COLORS[k],
-                    'line-opacity': k ? 1 : 0.9,
+                    'line-opacity': 0.75, // see the basemap underneath
                     'line-width': ['interpolate', ['linear'], ['zoom'], 8, W[k][0], 12, W[k][1], 16, W[k][2]],
                 },
             })
