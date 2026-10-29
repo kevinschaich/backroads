@@ -33,9 +33,8 @@ export const RULES = {
     curvy_min_deg_per_km: 120,
     great_min_score: 62,
     ok_min_score: 40,
-    // A road is only Great over a real stretch: short blips of a good road aren't worth driving to.
-    great_min_length_m: 800,
-    ok_min_length_m: 200,
+    // Only a real stretch is worth showing: shorter roads (stubs, driveways, blips of a good road) count as Bad.
+    min_length_m: 800,
 }
 
 /** Points each factor can add or take away, and where it maxes out. */
@@ -135,10 +134,8 @@ export function classify(p: Road, w: Weights): Verdict {
     )
         [k, r] = remote && twisty && p.n ? [2, 'backroad_twisty'] : remote ? [1, 'backroad'] : [0, 'neighborhood']
     else [k, r] = [score >= R.great_min_score ? 2 : score >= R.ok_min_score ? 1 : 0, 'score']
-    // Length caps: short stretches can't be Great, and blips count as Bad (hidden by default).
-    const cl = p.cl ?? Infinity
-    if (cl < R.ok_min_length_m && k > 0) [k, r] = [0, 'short']
-    else if (cl < R.great_min_length_m && k === 2) [k, r] = [1, 'short']
+    // Stretches under the minimum count as Bad (hidden by default), however good they are.
+    if ((p.cl ?? Infinity) < R.min_length_m && k > 0) [k, r] = [0, 'short']
     return { k, r, sc: Math.round(score), f }
 }
 
@@ -186,5 +183,5 @@ export function classExpr(w: Weights): Expr {
         0,
     ]
     const cl: Expr = ['coalesce', g('cl'), 1e9]
-    return ['case', ['<', cl, R.ok_min_length_m], 0, ['<', cl, R.great_min_length_m], ['min', base, 1], base]
+    return ['case', ['<', cl, R.min_length_m], 0, base]
 }

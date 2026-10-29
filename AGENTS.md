@@ -48,7 +48,7 @@ commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m 
 - Residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
   ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok.
 - Everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
-- Then length: a stretch under 800 m can't be great, under 200 m is bad.
+- Then length: any stretch under 800 m is bad (stubs, driveways and blips of a good road).
 - Bad roads are hidden by default; "Avoid hairpins" is off by default (0 points).
 
 Spot checks that should keep holding: Broadway, Federal, Bowles ~100% bad; Turkey Creek, Parmalee Gulch, Bear
