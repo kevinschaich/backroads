@@ -305,25 +305,48 @@ function wanted() {
   return out.sort((a, q) => Math.hypot(a[0] - cx, a[1] - cy) - Math.hypot(q[0] - cx, q[1] - cy));
 }
 
-async function refresh() {
+// One pass at a time: a pan during a pass asks for one more, which then reads the latest view. Before, passes
+// overlapped while awaiting IndexedDB, and one that failed midway left the rest of its view unrequested.
+let refreshing = null, refreshAgain = false;
+function refresh() {
+  if (refreshing) { refreshAgain = true; return refreshing; }
+  refreshing = refreshOnce()
+    .catch(err => console.warn("refresh failed", err))
+    .finally(() => {
+      refreshing = null;
+      updateStatus();
+      if (refreshAgain) { refreshAgain = false; refresh(); }
+    });
+  return refreshing;
+}
+
+async function refreshOnce() {
   const want = wanted(), wantKeys = new Set(want.map(([x, y]) => tileKey(x, y)));
   // Drop queued tiles that scrolled out of view; in-flight ones finish and stay cached.
   for (let i = queue.length - 1; i >= 0; i--) if (!wantKeys.has(queue[i].key)) { tiles.delete(queue[i].key); queue.splice(i, 1); }
   const now = Date.now();
-  for (const [x, y] of want) { const t = tiles.get(tileKey(x, y)); if (t) t.used = now; }
-  // Keep only the most recently viewed areas in memory; the rest stay in IndexedDB for later.
+  for (const key of wantKeys) { const t = tiles.get(key); if (t) t.used = now; }
+  evict();
+  const fresh = want.map(([x, y]) => ({ state: "queued", x, y, key: tileKey(x, y), used: now })).filter(t => !tiles.has(t.key));
+  for (const t of fresh) tiles.set(t.key, t);
+  // Look all new areas up in the cache at once; the misses go to the workers, nearest first.
+  const cached = await Promise.all(fresh.map(t => idb("readonly", s => s.get(t.key))));
+  fresh.forEach((t, i) => {
+    if (tiles.get(t.key) !== t) return;             // replaced or dropped meanwhile
+    if (cached[i]) Object.assign(t, cached[i], { state: "done" });
+    else queue.push(t);
+  });
+  if (cached.some(Boolean)) render();
+  pump();
+}
+
+// Keep only the most recently viewed areas in memory (the rest stay in IndexedDB), so the map never holds
+// more roads than it can redraw quickly. Runs as areas finish too, not only when the map moves.
+function evict() {
   const kept = [...tiles.values()].filter(t => t.state === "done").sort((a, b) => b.used - a.used);
-  if (kept.length > KEEP_TILES) { for (const t of kept.slice(KEEP_TILES)) tiles.delete(t.key); render(); }
-  for (const [x, y] of want) {
-    const key = tileKey(x, y);
-    if (tiles.has(key)) continue;
-    const t = { state: "queued", x, y, key, used: now };
-    tiles.set(key, t);
-    const cached = await idb("readonly", s => s.get(key));
-    if (cached) { Object.assign(t, cached, { state: "done" }); render(); continue; }
-    queue.push(t);
-  }
-  pump(); updateStatus();
+  if (kept.length <= KEEP_TILES) return;
+  for (const t of kept.slice(KEEP_TILES)) tiles.delete(t.key);
+  render();
 }
 
 function pump() {
@@ -337,10 +360,21 @@ function pump() {
       if (m.stage) { t.stage = m.stage; updateStatus(); return; }
       slot.busy = false;
       if (m.ok) {
-        Object.assign(t, { state: "done", roads: m.roads, sources: m.sources });
+        Object.assign(t, { state: "done", roads: m.roads, sources: m.sources, used: Date.now() });
         idb("readwrite", s => s.put({ roads: m.roads, sources: m.sources, at: Date.now() }, t.key));
+        evict();
         render();
       } else { t.state = "error"; t.error = m.error; console.warn("tile", t.key, m.error); }
+      pump(); updateStatus();
+    };
+    // A worker that crashes (e.g. out of memory) is replaced, and its area retries on the next pan.
+    slot.w.onerror = e => {
+      e.preventDefault?.();
+      console.warn("worker crashed on", t.key, e.message);
+      slot.w.terminate();
+      slot.w = new Worker("worker.js");
+      slot.busy = false;
+      t.state = "error"; t.error = "the worker crashed";
       pump(); updateStatus();
     };
     slot.w.postMessage({ id, x: t.x, y: t.y, z: TILE_Z });
@@ -452,6 +486,8 @@ function setBasemap(name) {
   }
 }
 
+// MapLibre reports problems (e.g. its worker failing to rebuild the road data) here rather than throwing.
+map.on("error", e => console.warn("map error", e.error || e));
 map.on("load", () => {
   map.addSource("roads", { type: "geojson", data: { type: "FeatureCollection", features: [] }, promoteId: "id" });
   const W = [[.4, 1.2, 3], [1, 2.4, 6], [1.2, 2.8, 7]];   // width at zoom 8 / 12 / 16: bad roads stay thin
