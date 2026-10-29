@@ -21,7 +21,7 @@ Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run 
 - `src/buildings.ts`: Overture buildings, fetched once per z14 tile for all workers and cached.
 - `public/worker.js`: fetches and measures one ~5 km area (z13 tile). Plain JS, served as a file (it loads
   geotiff.js with `importScripts`). Bump `CACHE_VERSION` in `src/engine.ts` whenever its measurements change.
-- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`: the UI. Search lists loaded roads first (choosing
+- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`, `src/DataSources.tsx` (the (i) in the map controls; keep it in step with the README): the UI. Search lists loaded roads first (choosing
   one fits it, highlights it and pins its card), then places from Photon.
 
 ## Data and loading

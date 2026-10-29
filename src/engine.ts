@@ -63,14 +63,6 @@ const BASEMAPS: Record<Basemap, { tiles?: string[]; attribution?: string; maxzoo
     none: { bg: '#18181b' },
 }
 
-const link = (href: string, text: string) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`
-const CREDITS = [
-    `Roads © ${link('https://www.openstreetmap.org/copyright', 'OpenStreetMap')} via Postpass / OSM API / Overpass`,
-    `buildings ${link('https://overturemaps.org', 'Overture Maps')}`,
-    `land cover ${link('https://esa-worldcover.org', 'ESA WorldCover 2021')}`,
-    `elevation ${link('https://mapterhorn.com', 'Mapterhorn')}`,
-]
-
 const store = (k: string, v?: unknown) => {
     try {
         v === undefined ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v))
@@ -121,6 +113,8 @@ const INITIAL_HASH = location.hash
 
 export class Engine {
     map: maplibregl.Map
+    /** An empty slot in the map controls; React renders the Data sources button into it. */
+    readonly infoControl = document.createElement('div')
     private tiles = new Map<string, Tile>()
     private queue: Tile[] = []
     private pool: { w: Worker; busy: boolean }[] = []
@@ -157,21 +151,18 @@ export class Engine {
             // The URL carries #zoom/lat/lon, updated when the map stops moving, so links reopen the same view.
             hash: true,
             dragRotate: false,
-            attributionControl: { compact: true, customAttribution: CREDITS },
+            // Sources are credited in the Data sources dialog (src/DataSources.tsx), behind an (i) in the controls.
+            attributionControl: false,
             style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#18181b' } }] },
         })
         this.map.touchZoomRotate.disableRotation()
         this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
         this.map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false } }), 'top-right')
+        this.infoControl.className = 'maplibregl-ctrl maplibregl-ctrl-group'
+        this.map.addControl({ onAdd: () => this.infoControl, onRemove: () => this.infoControl.remove() }, 'top-right')
         // MapLibre reports problems (e.g. its worker failing to rebuild the road data) here rather than throwing.
         this.map.on('error', (e: ErrorEvent) => console.warn('map error', e.error || e))
         this.map.on('load', () => this.onLoad())
-        // MapLibre opens the compact attribution on wide screens; start it collapsed behind its (i) button.
-        this.map.once('idle', () => {
-            const el = this.map.getContainer().querySelector<HTMLDetailsElement>('.maplibregl-ctrl-attrib')
-            el?.removeAttribute('open')
-            el?.classList.remove('maplibregl-compact-show')
-        })
         this.map.on('moveend', () => {
             store('view', { center: this.map.getCenter().toArray(), zoom: this.map.getZoom() })
             this.refresh()

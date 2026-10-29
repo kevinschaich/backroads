@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom'
+import { DataSources } from './DataSources'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Engine, type Snapshot } from './engine'
 import { Panel } from './Panel'
@@ -28,6 +30,7 @@ export function App() {
             {engine && snap && (
                 <>
                     <Panel engine={engine} snap={snap} />
+                    {createPortal(<DataSources />, engine.infoControl)}
                     {snap.card && <RoadCard engine={engine} card={snap.card} weights={snap.weights} />}
                 </>
             )}
