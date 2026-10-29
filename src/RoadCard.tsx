@@ -8,8 +8,11 @@ const n1 = (v: number) => Math.round(v * 10) / 10
 /** The hovered or pinned road: its class, why, and every measurement behind it. */
 export function RoadCard({ engine, card, weights }: { engine: Engine; card: NonNullable<Snapshot['card']>; weights: Weights }) {
     const p = card.road
-    // Rendered features carry the class from the last data upload; recompute with the current weights.
-    const { k, r, sc, f } = classify(p, weights)
+    // The final class (after the connectivity pass) rides on the road; the score and factors follow the live weights.
+    const live = classify(p, weights)
+    const { sc, f } = live
+    const k = (p as { k?: 0 | 1 | 2 }).k ?? live.k
+    const r = (p as { r?: string }).r ?? live.r
     const why = r === 'score' ? (f.length ? f.map((x) => FACTORS[x]).join(', ') : 'nothing stands out') : REASONS[r]
     const rows: [string, string][] = [
         ['Speed limit', p.s != null ? `${p.s} mph${p.ss === 'street' ? ' (on this street)' : ''}` : 'not in data'],

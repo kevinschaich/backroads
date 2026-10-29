@@ -15,6 +15,7 @@ Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run 
 
 - `src/engine.ts`: MapLibre, area loading, the IndexedDB cache and the road layers, outside React. React reads
   its snapshot (`subscribe`/`getSnapshot`). In dev it's on `window.engine` for poking at.
+- `src/smooth.ts`: the connectivity pass that turns per-segment classes into what the map shows.
 - `src/scoring.ts`: the rules and weights. `classify()` (road card, mile totals) and `classExpr()` (a MapLibre
   expression for the map colors, so sliders recolor on the GPU without re-sending data) must stay in sync.
 - `src/buildings.ts`: Overture buildings, fetched once per z14 tile for all workers and cached.
@@ -48,7 +49,10 @@ commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m 
 - Residential, posted <30, or posted 30 with ≥100 buildings/mi → bad, unless remote (≤25 buildings/mi,
   ≤1 stop/mi, ≤10% commercial); remote + twisty + named → great, remote otherwise → ok.
 - Everything else: score ≥62 great, ≥40 ok, else bad. Crosswalks are ignored (mapped unevenly).
-- Then length: any stretch under 800 m is bad (stubs, driveways and blips of a good road).
+- Then connectivity (`src/smooth.ts`, after scoring): along each named road, any run of OK/Great segments
+  shorter than 800 m becomes bad (stops flicker where neighboring segments straddle a threshold), and remote
+  residential roads that dead-end are bad. Both skip roads reaching areas that aren't loaded yet. While a
+  slider moves the map recolors from `classExpr()`; once it settles it switches to the smoothed classes.
 - Bad roads are hidden by default; "Avoid hairpins" is off by default (0 points).
 
 Spot checks that should keep holding: Broadway, Federal, Bowles ~100% bad; Turkey Creek, Parmalee Gulch, Bear

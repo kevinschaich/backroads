@@ -76,6 +76,7 @@ export const REASONS: Record<string, string> = {
     backroad: 'Quiet road with few houses, but not very twisty.',
     backroad_twisty: 'Slow road, but remote and twisty.',
     short: 'Too short a stretch to be worth driving to.',
+    dead_end: 'Quiet road, but a dead end.',
 }
 export const FACTORS: Record<string, string> = {
     '+curves': 'curvy',

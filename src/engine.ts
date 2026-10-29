@@ -7,7 +7,8 @@ import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
 maplibregl.setWorkerUrl(maplibreWorker)
 import { buildingTile } from './buildings'
-import { classExpr, classify, DEFAULT_WEIGHTS, type Road, type Weights, COLORS } from './scoring'
+import { finalize } from './smooth'
+import { classExpr, DEFAULT_WEIGHTS, type Road, type Verdict, type Weights, COLORS } from './scoring'
 
 const TILE_Z = 13
 const MAX_TILES = 100 // more visible than this and nothing new loads ("Zoom in")
@@ -16,7 +17,7 @@ const KEEP_TILES = 140 // areas kept in memory; the rest stay in IndexedDB
 const WORKERS = Math.min(6, Math.max(3, (navigator.hardwareConcurrency || 4) - 1))
 const CACHE_VERSION = 7 // bump whenever the worker's measurements change
 
-type Feature = { type: 'Feature'; properties: Road & { k?: number }; geometry: { type: 'LineString'; coordinates: number[][] } }
+type Feature = { type: 'Feature'; properties: Road & Partial<Verdict>; geometry: { type: 'LineString'; coordinates: number[][] } }
 type Tile = {
     key: string
     x: number
@@ -200,7 +201,7 @@ export class Engine {
                 id: `r${k}`,
                 type: 'line',
                 source: 'roads',
-                filter: ['==', classExpr(this.snap.weights), k] as never,
+                filter: ['==', ['get', 'k'], k],
                 layout: { 'line-cap': 'round', 'line-join': 'round', visibility: this.snap.hidden.includes(k) ? 'none' : 'visible' },
                 paint: {
                     'line-color': COLORS[k],
@@ -246,14 +247,15 @@ export class Engine {
         this.set({ hidden })
     }
 
+    // While a slider moves, the GPU recolors instantly from the per-road expression; once it settles, the
+    // connectivity pass (src/smooth.ts) recomputes the final classes and the layers switch back to them.
     setWeights(weights: Weights) {
         store('weights', weights)
         const e = classExpr(weights)
         for (const k of [0, 1, 2]) this.map.setFilter(`r${k}`, ['==', e, k] as never)
         this.set({ weights })
-        // Mile totals and the open road card are cheap to redo in JS, just not on every slider tick.
         clearTimeout(this.totalsTimer)
-        this.totalsTimer = window.setTimeout(() => this.totals(), 150)
+        this.totalsTimer = window.setTimeout(() => this.draw(), 300)
     }
 
     // ------------------------------------------------------------ area loading
@@ -419,13 +421,14 @@ export class Engine {
                     seen.add(f.properties.id)
                     this.features.push(f)
                 }
-        this.totals()
+        finalize(this.features, this.snap.weights, ([lon, lat]) => this.tiles.get(tileKey(lon2x(lon), lat2y(lat)))?.state === 'done')
         ;(this.map.getSource('roads') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: this.features as never })
-    }
-    private totals() {
+        for (const k of [0, 1, 2]) if (this.map.getLayer(`r${k}`)) this.map.setFilter(`r${k}`, ['==', ['get', 'k'], k])
         const km: [number, number, number] = [0, 0, 0]
-        for (const f of this.features) km[classify(f.properties, this.snap.weights).k] += f.properties.l / 1000
-        this.set({ miles: km.map((v) => v * 0.621371) as [number, number, number] })
+        for (const f of this.features) km[f.properties.k ?? 0] += f.properties.l / 1000
+        // Keep an open card in step with the final classes.
+        const card = this.snap.card && this.features.find((f) => f.properties.id === this.snap.card!.road.id)
+        this.set({ miles: km.map((v) => v * 0.621371) as [number, number, number], ...(card ? { card: { ...this.snap.card!, road: { ...card.properties } } } : {}) })
     }
 
     // ------------------------------------------------------------ places and roads
