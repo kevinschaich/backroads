@@ -11,7 +11,6 @@ const SOURCES: { what: string; from: string; href: string; license: string }[] =
     { what: 'Dark and Streets basemaps', from: 'OpenStreetMap tiles', href: 'https://www.openstreetmap.org/copyright', license: 'ODbL' },
     { what: 'Satellite basemap', from: 'USGS The National Map', href: 'https://www.usgs.gov/programs/national-geospatial-program/national-map', license: 'Public domain' },
     { what: 'Place search', from: 'Photon by Komoot', href: 'https://photon.komoot.io', license: 'OSM data, ODbL' },
-    { what: 'Map rendering', from: 'MapLibre GL JS', href: 'https://maplibre.org', license: 'BSD-3-Clause' },
 ]
 
 /** The (i) in the map controls and the dialog it opens, crediting every source. */

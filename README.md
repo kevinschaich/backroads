@@ -29,7 +29,6 @@ its measurements and why it got its color, and tune the weights with the sliders
 | Dark and Streets basemaps | [OpenStreetMap](https://www.openstreetmap.org/copyright) tiles | ODbL |
 | Satellite basemap | [USGS The National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map) | Public domain |
 | Place search | [Photon](https://photon.komoot.io) by Komoot | OSM data, ODbL |
-| Map rendering | [MapLibre GL JS](https://maplibre.org) | BSD-3-Clause |
 
 ## Run locally
 
