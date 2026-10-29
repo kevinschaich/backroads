@@ -64,3 +64,9 @@ commercial frontage, open land, curves, hills, hairpins (≥100° within ~100 m 
 Spot checks that should keep holding: Broadway, Federal, Bowles ~100% bad; Turkey Creek, Parmalee Gulch, Bear
 Creek Rd, mostly Lookout Mountain great; C-470 ok; Stanford's Campus Drive and Ken Caryl's South Continental
 Divide Rd bad; I-280 ok and US-101 bad on the Peninsula.
+
+## Approved exceptions
+
+- **Look (dark zinc theme):** on the Streets basemap the panels switch to shadcn's light zinc theme (the
+  `dark` class comes off `<html>`), so they match the light map; every other basemap stays dark. Why:
+  dark panels over the light OSM Streets map looked out of place. Approved by Kevin on 2026-10-28.
