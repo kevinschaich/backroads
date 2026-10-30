@@ -1,11 +1,6 @@
 import {
     Button,
     Byline,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
     Checkbox,
     Collapsible,
     CollapsibleContent,
@@ -13,14 +8,11 @@ import {
     Label,
     Separator,
     Slider,
-    Tabs,
-    TabsList,
-    TabsTrigger,
 } from '@kevinschaich/components'
-import { ChevronDown } from 'lucide-react'
-import type { Basemap, Engine, Snapshot } from './engine'
+import { BasemapTabs, MapPanel, PlaceSearch } from '@kevinschaich/components/map'
+import { ChevronDown, Route } from 'lucide-react'
+import type { Engine, Snapshot } from './engine'
 import { COLORS, DEFAULT_WEIGHTS, SLIDERS } from './scoring'
-import { Search } from './Search'
 
 const LEGEND = [
     { k: 2, label: 'Great', hint: 'curves, hills, open land' },
@@ -30,36 +22,28 @@ const LEGEND = [
 
 export function Panel({ engine, snap }: { engine: Engine; snap: Snapshot }) {
     return (
-        <Card
-            size="sm"
-            className="fixed z-10 max-h-[46%] gap-0 overflow-auto py-0 max-sm:inset-x-2 max-sm:bottom-[calc(8px+env(safe-area-inset-bottom))] sm:top-3 sm:left-3 sm:max-h-[calc(100%-24px)] sm:w-80"
-        >
-            <CardHeader className="gap-1 pt-4">
-                <CardTitle>Backroads</CardTitle>
-                <CardDescription>Pan anywhere to find roads worth driving.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4 pt-3 pb-4">
-                <Search engine={engine} />
-                <Legend engine={engine} snap={snap} />
-                <Status snap={snap} />
-                <Separator />
-                <div className="flex flex-col gap-2">
-                    <span className="text-sm font-medium">Basemap</span>
-                    <Tabs value={snap.basemap} onValueChange={(v) => engine.setBasemap(v as Basemap)}>
-                        <TabsList className="w-full">
-                            <TabsTrigger value="dark">Dark</TabsTrigger>
-                            <TabsTrigger value="streets">Streets</TabsTrigger>
-                            <TabsTrigger value="satellite">Satellite</TabsTrigger>
-                            <TabsTrigger value="none">None</TabsTrigger>
-                        </TabsList>
-                    </Tabs>
-                </div>
-                <Separator />
-                <Tune engine={engine} snap={snap} />
-                <Separator />
-                <Byline repo="kevinschaich/backroads" />
-            </CardContent>
-        </Card>
+        <MapPanel title="Backroads" description="Pan anywhere to find roads worth driving.">
+            {/* Loaded roads first (choosing one fits it, highlights it and pins its card), then places. */}
+            <PlaceSearch
+                placeholder="Search a road, town, address or ZIP"
+                featuresHeading="On the map"
+                searchFeatures={(q) =>
+                    engine.searchRoads(q).map((r, i) => ({ key: String(i), label: r.name, detail: r.detail, icon: <Route />, onSelect: () => engine.focusRoad(r) }))
+                }
+                onPlace={(p) => engine.goTo(p)}
+            />
+            <Legend engine={engine} snap={snap} />
+            <Status snap={snap} />
+            <Separator />
+            <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium">Basemap</span>
+                <BasemapTabs />
+            </div>
+            <Separator />
+            <Tune engine={engine} snap={snap} />
+            <Separator />
+            <Byline repo="kevinschaich/backroads" />
+        </MapPanel>
     )
 }
 

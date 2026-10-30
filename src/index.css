@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "@kevinschaich/components/theme.css";
 @import "@kevinschaich/components/styles.css";
-@import "maplibre-gl/dist/maplibre-gl.css";
+@import "@kevinschaich/components/map.css";
 @source "../node_modules/@kevinschaich/components/dist";
 
 html,

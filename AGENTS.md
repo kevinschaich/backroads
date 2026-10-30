@@ -10,10 +10,12 @@ phone-friendly, minimal effort for the owner to see results.
 
 ## Layout
 
-Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run with `bun install && bun dev`
+Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. The map shell comes from
+`@kevinschaich/map`: `<MapView>` (map creation, basemaps, `#zoom/lat/lon` hash, control stack with the (i),
+`lightUiOnLightBasemap` for Streets), `MapPanel`, `BasemapTabs` and `PlaceSearch`; `src/App.tsx` hands its map to the engine. Run with `bun install && bun dev`
 (also in `.claude/launch.json`).
 
-- `src/engine.ts`: MapLibre, area loading, the IndexedDB cache and the road layers, outside React. React reads
+- `src/engine.ts`: area loading, the IndexedDB cache and the road layers, outside React. React reads
   its snapshot (`subscribe`/`getSnapshot`). In dev it's on `window.engine` for poking at.
 - `src/smooth.ts`: the connectivity pass that turns per-segment classes into what the map shows.
 - `src/scoring.ts`: the rules and weights. `classify()` (road card, mile totals) and `classExpr()` (a MapLibre
@@ -21,7 +23,7 @@ Vite + React + TypeScript + Tailwind 4, UI from `@kevinschaich/components`. Run 
 - `src/buildings.ts`: Overture buildings, fetched once per z14 tile for all workers and cached.
 - `public/worker.js`: fetches and measures one ~5 km area (z13 tile). Plain JS, served as a file (it loads
   geotiff.js with `importScripts`). Bump `CACHE_VERSION` in `src/engine.ts` whenever its measurements change.
-- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/Search.tsx`, `src/DataSources.tsx` (the (i) in the map controls; keep it in step with the README): the UI. Search lists loaded roads first (choosing
+- `src/Panel.tsx`, `src/RoadCard.tsx`, `src/DataSources.tsx` (the (i) in the map controls; keep it in step with the README): the UI. Search (the package's `PlaceSearch`) lists loaded roads first (choosing
   one fits it, highlights it and pins its card), then places from Photon.
 
 ## Data and loading

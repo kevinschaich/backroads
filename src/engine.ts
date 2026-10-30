@@ -1,11 +1,10 @@
 // The map and area loading, outside React: MapLibre, the worker pool that fetches and measures ~5 km areas, the
 // IndexedDB cache, and the road layers. React reads a snapshot (subscribe/getSnapshot) and calls the setters.
 import * as maplibregl from 'maplibre-gl'
-import type { ErrorEvent, GeoJSONSource, MapMouseEvent } from 'maplibre-gl'
+import type { Place } from '@kevinschaich/components/map'
+import type { GeoJSONSource, MapMouseEvent } from 'maplibre-gl'
 // MapLibre 6 loads its worker relative to its own module, which bundlers don't pick up; bundle it explicitly.
-import maplibreWorker from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 
-maplibregl.setWorkerUrl(maplibreWorker)
 import { buildingTile } from './buildings'
 import { landcoverToken } from './landcover'
 import { finalize } from './smooth'
@@ -30,8 +29,6 @@ type Tile = {
     started?: number
     error?: string
 }
-export type Basemap = 'dark' | 'streets' | 'satellite' | 'none'
-export type Place = { name: string; detail: string; lat: number; lon: number; extent?: [number, number, number, number] }
 /** A loaded road matching a search: all its segments, and the longest one for its card. */
 export type RoadHit = { name: string; detail: string; miles: number; k: number; bounds: [number, number, number, number]; road: Road }
 export type Snapshot = {
@@ -40,27 +37,7 @@ export type Snapshot = {
     miles: [number, number, number]
     hidden: number[]
     weights: Weights
-    basemap: Basemap
     card: { road: Road; pinned: boolean } | null
-}
-
-const BASEMAPS: Record<Basemap, { tiles?: string[]; attribution?: string; maxzoom?: number; bg: string; paint?: Record<string, number> }> = {
-    // OSM tiles inverted and desaturated (Carto's dark tiles now need an API key).
-    dark: {
-        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-        attribution: '© OpenStreetMap contributors',
-        maxzoom: 19,
-        bg: '#18181b',
-        paint: { 'raster-brightness-min': 0.9, 'raster-brightness-max': 0.08, 'raster-saturation': -0.85, 'raster-contrast': 0.1 },
-    },
-    streets: { tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], attribution: '© OpenStreetMap contributors', maxzoom: 19, bg: '#f2efe9' },
-    satellite: {
-        tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],
-        attribution: 'USGS The National Map',
-        maxzoom: 16,
-        bg: '#111',
-    },
-    none: { bg: '#18181b' },
 }
 
 const store = (k: string, v?: unknown) => {
@@ -108,12 +85,9 @@ async function idb<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
 const lon2x = (lon: number) => Math.floor(((lon + 180) / 360) * 2 ** TILE_Z)
 const lat2y = (lat: number) => Math.floor(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** TILE_Z)
 const tileKey = (x: number, y: number) => `v${CACHE_VERSION}/${TILE_Z}/${x}/${y}`
-// Read once at startup: removing a map (React's dev mode mounts twice) clears the hash it was managing.
-const INITIAL_HASH = location.hash
 
 export class Engine {
     map: maplibregl.Map
-    /** An empty slot in the map controls; React renders the Data sources button into it. */
     private tiles = new Map<string, Tile>()
     private queue: Tile[] = []
     private pool: { w: Worker; busy: boolean }[] = []
@@ -130,41 +104,21 @@ export class Engine {
     private narrow = matchMedia('(max-width: 640px)').matches
     timings: Record<string, number>[] = []
 
-    constructor(container: HTMLElement) {
+    /** Takes the map from <MapView> (@kevinschaich/components/map), which owns the basemap, the URL hash and the controls. */
+    constructor(map: maplibregl.Map) {
+        this.map = map
         const weights = { ...DEFAULT_WEIGHTS, ...(recall<Weights>('weights') ?? {}) }
-        const basemap = (recall<Basemap>('basemap') ?? 'dark') in BASEMAPS ? (recall<Basemap>('basemap') ?? 'dark') : 'dark'
         // Bad roads are hidden by default: the map reads cleaner with just the roads worth driving.
         const hidden = recall<number[]>('hidden') ?? [0]
-        this.snap = { status: { busy: 0, done: 0, tooMany: false }, jobs: [], miles: [0, 0, 0], hidden, weights, basemap, card: null }
+        this.snap = { status: { busy: 0, done: 0, tooMany: false }, jobs: [], miles: [0, 0, 0], hidden, weights, card: null }
 
         for (let i = 0; i < WORKERS; i++) this.pool.push({ w: this.worker(), busy: false })
-        // A #zoom/lat/lon link wins over the last view remembered in this browser.
-        const [z, lat, lon] = INITIAL_HASH.slice(1).split('/').map(Number)
-        const home = [z, lat, lon].every(Number.isFinite)
-            ? { center: [lon, lat] as [number, number], zoom: z }
-            : (recall<{ center: [number, number]; zoom: number }>('view') ?? { center: [-105.0166, 39.6133], zoom: 12 })
-        this.map = new maplibregl.Map({
-            container,
-            center: home.center,
-            zoom: home.zoom,
-            // The URL carries #zoom/lat/lon, updated when the map stops moving, so links reopen the same view.
-            hash: true,
-            dragRotate: false,
-            // Sources are credited in the Data sources dialog (src/DataSources.tsx), behind the (i) in the shared control stack.
-            attributionControl: false,
-            style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#18181b' } }] },
-        })
-        this.map.touchZoomRotate.disableRotation()
-        // Zoom, locate and the (i) are the shared control stack, <MapControls> in App.tsx.
-        // MapLibre reports problems (e.g. its worker failing to rebuild the road data) here rather than throwing.
-        this.map.on('error', (e: ErrorEvent) => console.warn('map error', e.error || e))
-        this.map.on('load', () => this.onLoad())
-        this.map.on('moveend', () => {
-            store('view', { center: this.map.getCenter().toArray(), zoom: this.map.getZoom() })
-            this.refresh()
-        })
+        this.map.on('moveend', this.onMove)
         this.wireInteraction()
+        this.onLoad()
     }
+
+    private onMove = () => this.refresh()
 
     private worker() {
         return new Worker(`${import.meta.env.BASE_URL}worker.js`)
@@ -216,24 +170,8 @@ export class Engine {
             },
             'r0',
         )
-        this.setBasemap(this.snap.basemap)
         this.render()
         this.refresh()
-    }
-
-    setBasemap(name: Basemap) {
-        store('basemap', name)
-        document.documentElement.classList.toggle('dark', name !== 'streets')
-        const map = this.map
-        const B = BASEMAPS[name]
-        if (map.getLayer('base')) map.removeLayer('base')
-        if (map.getSource('base')) map.removeSource('base')
-        map.setPaintProperty('bg', 'background-color', B.bg)
-        if (B.tiles) {
-            map.addSource('base', { type: 'raster', tiles: B.tiles, tileSize: 256, maxzoom: B.maxzoom, attribution: B.attribution })
-            map.addLayer({ id: 'base', type: 'raster', source: 'base', paint: B.paint ?? { 'raster-opacity': 0.85 } }, 'hl')
-        }
-        this.set({ basemap: name })
     }
 
     setHidden(k: number, hide: boolean) {
@@ -519,21 +457,21 @@ export class Engine {
     }
 
     // Hovering previews a road; clicking one pins its card (hover stops changing it) until it's closed.
+    private onHover = (e: MapMouseEvent) => {
+        if (!this.map.getLayer('r0')) return
+        const road = this.pick(e.point, 4)
+        this.map.getCanvas().style.cursor = road ? 'pointer' : ''
+        if (this.snap.card?.pinned) return
+        if ((road?.id ?? null) !== (this.snap.card?.road.id ?? null)) this.showCard(road)
+    }
+    private onClick = (e: MapMouseEvent) => {
+        if (!this.map.getLayer('r0')) return
+        const road = this.pick(e.point, this.narrow ? 12 : 5)
+        if (road) this.showCard(road, true)
+    }
     private wireInteraction() {
-        const hoverable = matchMedia('(hover: hover)').matches
-        if (hoverable)
-            this.map.on('mousemove', (e: MapMouseEvent) => {
-                if (!this.map.getLayer('r0')) return
-                const road = this.pick(e.point, 4)
-                this.map.getCanvas().style.cursor = road ? 'pointer' : ''
-                if (this.snap.card?.pinned) return
-                if ((road?.id ?? null) !== (this.snap.card?.road.id ?? null)) this.showCard(road)
-            })
-        this.map.on('click', (e: MapMouseEvent) => {
-            if (!this.map.getLayer('r0')) return
-            const road = this.pick(e.point, this.narrow ? 12 : 5)
-            if (road) this.showCard(road, true)
-        })
+        if (matchMedia('(hover: hover)').matches) this.map.on('mousemove', this.onHover)
+        this.map.on('click', this.onClick)
     }
 
     async clearCache() {
@@ -543,35 +481,19 @@ export class Engine {
         this.refresh()
     }
 
-    /** Photon search (OSM-based, made for search-as-you-type), biased toward the current view. */
-    async search(text: string, signal: AbortSignal): Promise<Place[]> {
-        const c = this.map.getCenter()
-        const r = await fetch(
-            `https://photon.komoot.io/api/?q=${encodeURIComponent(text)}&limit=6&lang=en&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}`,
-            { signal },
-        )
-        const d = await r.json()
-        return d.features.map((f: { properties: Record<string, string> & { extent?: [number, number, number, number] }; geometry: { coordinates: [number, number] } }) => {
-            const p = f.properties
-            const [lon, lat] = f.geometry.coordinates
-            const street = p.housenumber && p.street ? `${p.housenumber} ${p.street}` : p.street
-            const name = p.name || street || p.city || p.postcode || 'Unnamed place'
-            const detail = [p.name && street !== name ? street : null, p.city !== name ? p.city : null, p.state, p.countrycode !== 'US' ? p.country : null]
-                .filter(Boolean)
-                .join(', ')
-            return { name, detail, lat, lon, extent: p.extent }
-        })
-    }
-
     goTo(place: Place) {
         if (place.extent) {
-            const [w, n, e, s] = place.extent
-            this.fitPlace(s, w, n, e)
+            const [w, south, e, n] = place.extent
+            this.fitPlace(south, w, n, e)
         } else this.fitPlace(place.lat, place.lon, place.lat, place.lon)
     }
 
     destroy() {
         this.pool.forEach((s) => s.w.terminate())
-        this.map.remove()
+        this.map.off('moveend', this.onMove)
+        this.map.off('mousemove', this.onHover)
+        this.map.off('click', this.onClick)
+        for (const id of ['hl', 'r0', 'r1', 'r2']) if (this.map.getLayer(id)) this.map.removeLayer(id)
+        if (this.map.getSource('roads')) this.map.removeSource('roads')
     }
 }
