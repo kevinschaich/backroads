@@ -1,8 +1,7 @@
-import { Button, DataSources as SharedDataSources, type DataSource } from '@kevinschaich/components'
-import { Info } from 'lucide-react'
+import type { DataSource } from '@kevinschaich/components'
 
 // Where everything on the map comes from. Keep in step with the README.
-const SOURCES: DataSource[] = [
+export const SOURCES: DataSource[] = [
     { what: 'Roads, junctions, signals, speed limits', from: 'OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright', license: 'ODbL' },
     { what: 'Buildings', from: 'Overture Maps Foundation', href: 'https://overturemaps.org', license: 'ODbL' },
     { what: 'Land cover', from: 'ESA WorldCover 2021', href: 'https://esa-worldcover.org', license: 'CC BY 4.0' },
@@ -11,17 +10,3 @@ const SOURCES: DataSource[] = [
     { what: 'Satellite basemap', from: 'USGS The National Map', href: 'https://www.usgs.gov/programs/national-geospatial-program/national-map', license: 'Public domain' },
     { what: 'Place search', from: 'Photon by Komoot', href: 'https://photon.komoot.io', license: 'OSM data, ODbL' },
 ]
-
-/** The (i) in MapLibre's control stack, muted to match the controls around it. */
-export function DataSources() {
-    return (
-        <SharedDataSources
-            sources={SOURCES}
-            trigger={
-                <Button variant="ghost" size="icon-sm" title="Data sources" aria-label="Data sources" className="text-zinc-500 hover:bg-transparent hover:text-zinc-800">
-                    <Info />
-                </Button>
-            }
-        />
-    )
-}

@@ -114,7 +114,6 @@ const INITIAL_HASH = location.hash
 export class Engine {
     map: maplibregl.Map
     /** An empty slot in the map controls; React renders the Data sources button into it. */
-    readonly infoControl = document.createElement('div')
     private tiles = new Map<string, Tile>()
     private queue: Tile[] = []
     private pool: { w: Worker; busy: boolean }[] = []
@@ -151,15 +150,12 @@ export class Engine {
             // The URL carries #zoom/lat/lon, updated when the map stops moving, so links reopen the same view.
             hash: true,
             dragRotate: false,
-            // Sources are credited in the Data sources dialog (src/DataSources.tsx), behind an (i) in the controls.
+            // Sources are credited in the Data sources dialog (src/DataSources.tsx), behind the (i) in the shared control stack.
             attributionControl: false,
             style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#18181b' } }] },
         })
         this.map.touchZoomRotate.disableRotation()
-        this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
-        this.map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: false } }), 'top-right')
-        this.infoControl.className = 'maplibregl-ctrl maplibregl-ctrl-group'
-        this.map.addControl({ onAdd: () => this.infoControl, onRemove: () => this.infoControl.remove() }, 'top-right')
+        // Zoom, locate and the (i) are the shared control stack, <MapControls> in App.tsx.
         // MapLibre reports problems (e.g. its worker failing to rebuild the road data) here rather than throwing.
         this.map.on('error', (e: ErrorEvent) => console.warn('map error', e.error || e))
         this.map.on('load', () => this.onLoad())
